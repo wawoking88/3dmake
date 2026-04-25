@@ -286,7 +286,11 @@ function setObjectColor(s){
 
 function setEditorLayerDeep(object){
   object.layers.set(EDITOR_LAYER);
-  object.traverse(child => child.layers.set(EDITOR_LAYER));
+  object.userData.isEditorGizmo = true;
+  object.traverse(child => {
+    child.layers.set(EDITOR_LAYER);
+    child.userData.isEditorGizmo = true;
+  });
 }
 
 function makeArrowAxis(name, color){
@@ -441,6 +445,7 @@ let draggingAxis = null;
 let dragStart = null;
 let objectStart = null;
 let draggingSelectedBody = false;
+let dragSpriteId = null;
 stageWrap.addEventListener("pointerdown", e=>{
   if(running) return;
   const rect = stageWrap.getBoundingClientRect();
@@ -456,24 +461,41 @@ stageWrap.addEventListener("pointerdown", e=>{
   if(gizHits.length){
     const hitObj = gizHits[0].object;
     draggingAxis = hitObj.userData.axis || hitObj.name || hitObj.parent?.userData?.axis || hitObj.parent?.name;
+
+    const selected = getSelectedSprite();
+    if(!selected) return;
+
+    // 矢印を触った時は、選択を変えずに「現在選択中のスプライト」だけを動かす
+    dragSpriteId = selected.id;
     dragStart = {x:e.clientX,y:e.clientY};
-    objectStart = getSelectedSprite().object.clone();
+    objectStart = selected.object.clone();
     controls.enabled = false;
     stageWrap.setPointerCapture(e.pointerId);
     return;
   }
   const meshes = [];
-  for(const s of sprites) s.object.traverse(c=>{ if(c.isMesh) meshes.push(c); });
+  for(const s of sprites) {
+    s.object.traverse(c => {
+      if(c.isMesh && !c.userData.isEditorGizmo) meshes.push(c);
+    });
+  }
+
+  // スプライト本体の選択判定はゲームレイヤーだけを見る。
+  // 操作ガイドやカメラ編集用ガイドを誤って選ばないため。
+  raycaster.layers.set(GAME_LAYER);
   const hits = raycaster.intersectObjects(meshes,false);
   if(hits.length){
     const id = hits[0].object.userData.spriteId;
-    if(id) {
+    const clickedSprite = sprites.find(s => s.id === id);
+
+    if(clickedSprite) {
       selectSprite(id);
 
       // 操作ガイドが掴みにくい時用：
       // 選択したスプライト本体をドラッグしても編集できるようにする
       draggingSelectedBody = true;
       draggingAxis = "body";
+      dragSpriteId = id;
       dragStart = {x:e.clientX,y:e.clientY};
       objectStart = getSelectedSprite().object.clone();
       controls.enabled = false;
@@ -483,7 +505,7 @@ stageWrap.addEventListener("pointerdown", e=>{
 });
 stageWrap.addEventListener("pointermove", e=>{
   if(!draggingAxis) return;
-  const s = getSelectedSprite();
+  const s = sprites.find(x => x.id === dragSpriteId) || getSelectedSprite();
   if(!s) return;
   const dx = (e.clientX - dragStart.x) * 0.02;
   const dy = (e.clientY - dragStart.y) * 0.02;
@@ -521,6 +543,7 @@ stageWrap.addEventListener("pointermove", e=>{
 stageWrap.addEventListener("pointerup", e=>{
   draggingAxis = null;
   draggingSelectedBody = false;
+  dragSpriteId = null;
   controls.enabled = true;
   try{ stageWrap.releasePointerCapture(e.pointerId); }catch(_){}
 });
