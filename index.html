@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Scratch風 3Dゲームメーカー</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🧊 Scratch風 3Dゲームメーカー</div>
+    <div class="topActions">
+      <button id="runBtn" class="primary">▶ 実行</button>
+      <button id="stopBtn">■ 停止</button>
+      <button id="saveBtn">保存</button>
+      <button id="loadBtn">読込</button>
+      <button id="clearBtn" class="danger">全消去</button>
+    </div>
+  </header>
+
+  <main class="app">
+    <section class="leftPanel">
+      <div class="panelTitle">ブロック</div>
+
+      <div class="category">イベント</div>
+      <button class="block event" data-type="whenStart">▶ はじまったとき</button>
+      <button class="block event" data-type="forever">ずっと</button>
+
+      <div class="category">動き</div>
+      <button class="block motion" data-type="moveForward">前に <span>1</span> 動く</button>
+      <button class="block motion" data-type="turnY">Y回転 <span>15</span> 度</button>
+      <button class="block motion" data-type="goTo">座標 x:<span>0</span> y:<span>1</span> z:<span>0</span></button>
+      <button class="block motion" data-type="jump">ジャンプ</button>
+
+      <div class="category">見た目</div>
+      <button class="block looks" data-type="setColor">色を変える</button>
+      <button class="block looks" data-type="scale">大きさを <span>1.2</span> 倍</button>
+
+      <div class="category">制御</div>
+      <button class="block control" data-type="wait"> <span>1</span> 秒待つ</button>
+      <button class="block control" data-type="ifKey">もしキー <span>ArrowUp</span> が押されたら</button>
+
+      <div class="hint">
+        ブロックを押すと、選択中スプライトのコードに追加されます。
+      </div>
+    </section>
+
+    <section class="centerPanel">
+      <div class="stageHeader">
+        <div>
+          <strong>3Dステージ</strong>
+          <span id="status">停止中</span>
+        </div>
+        <div class="cameraBtns">
+          <button id="camResetBtn">カメラリセット</button>
+        </div>
+      </div>
+      <div id="stageWrap">
+        <canvas id="stage"></canvas>
+      </div>
+
+      <div class="scriptArea">
+        <div class="scriptHeader">
+          <strong>コード</strong>
+          <span id="selectedSpriteName">Cube</span>
+        </div>
+        <div id="scriptList" class="scriptList"></div>
+      </div>
+    </section>
+
+    <section class="rightPanel">
+      <div class="panelTitle">スプライト</div>
+      <div id="spriteList" class="spriteList"></div>
+
+      <button id="addCubeBtn">＋ Cube追加</button>
+      <button id="addSphereBtn">＋ Sphere追加</button>
+      <button id="addCapsuleBtn">＋ Capsule追加</button>
+
+      <div class="panelTitle small">プロパティ</div>
+      <div class="propGrid">
+        <label>名前<input id="propName" /></label>
+        <label>X<input id="propX" type="number" step="0.1" /></label>
+        <label>Y<input id="propY" type="number" step="0.1" /></label>
+        <label>Z<input id="propZ" type="number" step="0.1" /></label>
+        <label>色<input id="propColor" type="color" /></label>
+      </div>
+      <button id="deleteSpriteBtn" class="danger full">選択スプライト削除</button>
+
+      <div class="panelTitle small">操作</div>
+      <p class="note">
+        実行中：矢印キーで動かせます。<br>
+        マウスドラッグでカメラ回転、ホイールでズーム。
+      </p>
+    </section>
+  </main>
+
+  <template id="scriptBlockTemplate">
+    <div class="scriptBlock">
+      <span class="label"></span>
+      <div class="inputs"></div>
+      <button class="mini remove">×</button>
+    </div>
+  </template>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
