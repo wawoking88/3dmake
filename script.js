@@ -1,13 +1,19 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { TransformControls } from "three/addons/controls/TransformControls.js";
 
-window.addEventListener("error", (e) => {
-  console.error("JSエラー:", e.message, e.error);
+const errorBox = document.getElementById("errorBox");
+function showError(err){
+  const msg = err && err.stack ? err.stack : String(err);
+  console.error(err);
+  errorBox.textContent = "エラー内容:\n" + msg;
+  errorBox.classList.remove("hidden");
   const status = document.getElementById("status");
-  if (status) status.textContent = "エラー: Console確認";
-});
+  if(status) status.textContent = "エラー";
+}
+window.addEventListener("error", e => showError(e.error || e.message));
+window.addEventListener("unhandledrejection", e => showError(e.reason));
 
+try {
 const canvas = document.getElementById("stage");
 const stageWrap = document.getElementById("stageWrap");
 const spriteListEl = document.getElementById("spriteList");
@@ -20,1001 +26,463 @@ const propX = document.getElementById("propX");
 const propY = document.getElementById("propY");
 const propZ = document.getElementById("propZ");
 const propColor = document.getElementById("propColor");
-
 const modal = document.getElementById("spriteModal");
 
 let sprites = [];
 let selectedSpriteId = null;
 let running = false;
-let editCameraEnabled = true;
 let lastTime = 0;
-const pressedKeys = new Set();
-
+let editMode = "translate";
 let workspace = null;
 let isLoadingWorkspace = false;
+const pressedKeys = new Set();
 
-function uid() {
-  if (crypto && crypto.randomUUID) return crypto.randomUUID();
-  return "id_" + Math.random().toString(36).slice(2);
+function uid(){ return (crypto && crypto.randomUUID) ? crypto.randomUUID() : "id_" + Math.random().toString(36).slice(2); }
+
+if (!window.Blockly) {
+  throw new Error("Blocklyが読み込めませんでした。インターネット接続、またはCDNの読み込みを確認してください。");
 }
 
-/* ---------------------------
-   Three.js
---------------------------- */
-
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdbeafe);
 
-const previewCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
-previewCamera.position.set(7, 5, 8);
+const previewCamera = new THREE.PerspectiveCamera(60,1,0.1,1000);
+previewCamera.position.set(7,5,8);
 
-const gameCamera = new THREE.PerspectiveCamera(65, 1, 0.1, 1000);
+const gameCamera = new THREE.PerspectiveCamera(65,1,0.1,1000);
 
 const controls = new OrbitControls(previewCamera, renderer.domElement);
-controls.target.set(0, 1, 0);
+controls.target.set(0,1,0);
 controls.enableDamping = true;
 
-const transformControls = new TransformControls(previewCamera, renderer.domElement);
-transformControls.addEventListener("dragging-changed", (event) => {
-  controls.enabled = !event.value;
-});
-transformControls.addEventListener("objectChange", () => {
-  syncSelectedFromTransform();
-});
-scene.add(transformControls);
-
-scene.add(new THREE.HemisphereLight(0xffffff, 0x335577, 1.6));
-
-const dir = new THREE.DirectionalLight(0xffffff, 1.1);
-dir.position.set(5, 8, 4);
+scene.add(new THREE.HemisphereLight(0xffffff,0x335577,1.6));
+const dir = new THREE.DirectionalLight(0xffffff,1.1);
+dir.position.set(5,8,4);
 scene.add(dir);
-
-scene.add(new THREE.GridHelper(40, 40, 0x64748b, 0x94a3b8));
+scene.add(new THREE.GridHelper(40,40,0x64748b,0x94a3b8));
 
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(40, 40),
-  new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.9 })
+  new THREE.PlaneGeometry(40,40),
+  new THREE.MeshStandardMaterial({color:0xcbd5e1,roughness:.9})
 );
-floor.rotation.x = -Math.PI / 2;
+floor.rotation.x = -Math.PI/2;
 floor.position.y = -0.01;
 scene.add(floor);
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
-function createGeometry(kind) {
-  if (kind === "sphere") return new THREE.SphereGeometry(0.7, 32, 18);
-  if (kind === "cylinder") return new THREE.CylinderGeometry(0.55, 0.55, 1.3, 32);
-  if (kind === "capsule") return new THREE.CapsuleGeometry(0.45, 1.1, 8, 16);
-  if (kind === "cone") return new THREE.ConeGeometry(0.65, 1.4, 32);
-  if (kind === "camera") return new THREE.BoxGeometry(0.9, 0.55, 0.55);
-  return new THREE.BoxGeometry(1.4, 0.8, 1.0);
+const gizmo = new THREE.Group();
+scene.add(gizmo);
+
+function createGeometry(kind){
+  if(kind==="sphere") return new THREE.SphereGeometry(.7,32,18);
+  if(kind==="cylinder") return new THREE.CylinderGeometry(.55,.55,1.3,32);
+  if(kind==="capsule" && THREE.CapsuleGeometry) return new THREE.CapsuleGeometry(.45,1.1,8,16);
+  if(kind==="capsule") return new THREE.CylinderGeometry(.45,.45,1.5,24);
+  if(kind==="cone") return new THREE.ConeGeometry(.65,1.4,32);
+  return new THREE.BoxGeometry(1.4,.8,1);
 }
 
-function makeCameraVisual() {
+function makeCameraVisual(){
   const group = new THREE.Group();
-
-  const body = new THREE.Mesh(
-    createGeometry("camera"),
-    new THREE.MeshStandardMaterial({ color: "#111827", roughness: 0.65 })
-  );
+  const body = new THREE.Mesh(new THREE.BoxGeometry(.9,.55,.55), new THREE.MeshStandardMaterial({color:"#111827",roughness:.65}));
   group.add(body);
-
-  const lens = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.18, 0.32, 24),
-    new THREE.MeshStandardMaterial({ color: "#60a5fa", roughness: 0.3 })
-  );
-  lens.rotation.x = Math.PI / 2;
-  lens.position.z = -0.42;
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.32,24), new THREE.MeshStandardMaterial({color:"#60a5fa"}));
+  lens.rotation.x = Math.PI/2;
+  lens.position.z = -.42;
   group.add(lens);
-
-  const dirLine = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, -0.65),
-      new THREE.Vector3(0, 0, -3.4)
-    ]),
-    new THREE.LineBasicMaterial({ color: 0xffffff })
-  );
-  group.add(dirLine);
-
-  const cone = new THREE.LineSegments(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, -0.7), new THREE.Vector3(-1.1, 0.7, -3.2),
-      new THREE.Vector3(0, 0, -0.7), new THREE.Vector3(1.1, 0.7, -3.2),
-      new THREE.Vector3(0, 0, -0.7), new THREE.Vector3(-1.1, -0.7, -3.2),
-      new THREE.Vector3(0, 0, -0.7), new THREE.Vector3(1.1, -0.7, -3.2),
-      new THREE.Vector3(-1.1, 0.7, -3.2), new THREE.Vector3(1.1, 0.7, -3.2),
-      new THREE.Vector3(1.1, 0.7, -3.2), new THREE.Vector3(1.1, -0.7, -3.2),
-      new THREE.Vector3(1.1, -0.7, -3.2), new THREE.Vector3(-1.1, -0.7, -3.2),
-      new THREE.Vector3(-1.1, -0.7, -3.2), new THREE.Vector3(-1.1, 0.7, -3.2)
-    ]),
-    new THREE.LineBasicMaterial({ color: 0xffffff })
-  );
-  group.add(cone);
-
+  const pts = [
+    [0,0,-.65, 0,0,-3.4],
+    [0,0,-.7, -1.1,.7,-3.2],
+    [0,0,-.7, 1.1,.7,-3.2],
+    [0,0,-.7, -1.1,-.7,-3.2],
+    [0,0,-.7, 1.1,-.7,-3.2],
+    [-1.1,.7,-3.2, 1.1,.7,-3.2],
+    [1.1,.7,-3.2, 1.1,-.7,-3.2],
+    [1.1,-.7,-3.2, -1.1,-.7,-3.2],
+    [-1.1,-.7,-3.2, -1.1,.7,-3.2]
+  ];
+  const points = [];
+  for(const p of pts){
+    points.push(new THREE.Vector3(p[0],p[1],p[2]), new THREE.Vector3(p[3],p[4],p[5]));
+  }
+  group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({color:0xffffff})));
   return group;
 }
 
-function createObject(kind, color) {
-  if (kind === "camera") return makeCameraVisual();
-
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
-  return new THREE.Mesh(createGeometry(kind), material);
+function createObject(kind,color){
+  if(kind==="camera") return makeCameraVisual();
+  return new THREE.Mesh(createGeometry(kind), new THREE.MeshStandardMaterial({color,roughness:.55}));
 }
 
-/* ---------------------------
-   Blockly
---------------------------- */
+function colorForKind(kind){
+  return {sphere:"#f97316",cylinder:"#06b6d4",capsule:"#22c55e",cone:"#eab308",camera:"#111827",box:"#3b82f6"}[kind] || "#3b82f6";
+}
+function kindName(kind){
+  return {box:"直方体",sphere:"球",cylinder:"円柱",capsule:"Capsule",cone:"円すい",camera:"カメラ"}[kind] || kind;
+}
 
-function defineBlocklyBlocks() {
+function defineBlocklyBlocks(){
   Blockly.defineBlocksWithJsonArray([
-    {
-      "type": "event_start",
-      "message0": "▶ はじまったとき %1 %2",
-      "args0": [
-        { "type": "input_dummy" },
-        { "type": "input_statement", "name": "DO" }
-      ],
-      "colour": "#f59e0b",
-      "tooltip": "実行ボタンを押したときに1回動きます。"
-    },
-    {
-      "type": "event_forever",
-      "message0": "ずっと %1 %2",
-      "args0": [
-        { "type": "input_dummy" },
-        { "type": "input_statement", "name": "DO" }
-      ],
-      "colour": "#f59e0b",
-      "tooltip": "実行中、毎フレームくり返します。"
-    },
-    {
-      "type": "move_forward",
-      "message0": "前に %1 動く",
-      "args0": [
-        { "type": "field_number", "name": "AMOUNT", "value": 1, "min": -100, "max": 100, "precision": 0.1 }
-      ],
-      "previousStatement": null,
-      "nextStatement": null,
-      "colour": "#3b82f6"
-    },
-    {
-      "type": "turn_y",
-      "message0": "Y回転 %1 度",
-      "args0": [
-        { "type": "field_number", "name": "DEG", "value": 15, "min": -360, "max": 360, "precision": 1 }
-      ],
-      "previousStatement": null,
-      "nextStatement": null,
-      "colour": "#3b82f6"
-    },
-    {
-      "type": "go_to",
-      "message0": "座標 x %1 y %2 z %3 へ行く",
-      "args0": [
-        { "type": "field_number", "name": "X", "value": 0, "precision": 0.1 },
-        { "type": "field_number", "name": "Y", "value": 1, "precision": 0.1 },
-        { "type": "field_number", "name": "Z", "value": 0, "precision": 0.1 }
-      ],
-      "previousStatement": null,
-      "nextStatement": null,
-      "colour": "#3b82f6"
-    },
-    {
-      "type": "jump",
-      "message0": "ジャンプ 強さ %1",
-      "args0": [
-        { "type": "field_number", "name": "POWER", "value": 0.18, "min": 0, "max": 5, "precision": 0.01 }
-      ],
-      "previousStatement": null,
-      "nextStatement": null,
-      "colour": "#3b82f6"
-    },
-    {
-      "type": "set_color",
-      "message0": "色を %1 にする",
-      "args0": [
-        { "type": "field_colour", "name": "COLOR", "colour": "#ff6b6b" }
-      ],
-      "previousStatement": null,
-      "nextStatement": null,
-      "colour": "#8b5cf6"
-    },
-    {
-      "type": "set_scale",
-      "message0": "大きさを %1 倍にする",
-      "args0": [
-        { "type": "field_number", "name": "SCALE", "value": 1.2, "min": 0.1, "max": 20, "precision": 0.1 }
-      ],
-      "previousStatement": null,
-      "nextStatement": null,
-      "colour": "#8b5cf6"
-    },
-    {
-      "type": "wait_seconds",
-      "message0": "%1 秒待つ",
-      "args0": [
-        { "type": "field_number", "name": "SEC", "value": 1, "min": 0, "max": 60, "precision": 0.1 }
-      ],
-      "previousStatement": null,
-      "nextStatement": null,
-      "colour": "#ec4899"
-    },
-    {
-      "type": "key_pressed",
-      "message0": "キー %1 が押された",
-      "args0": [
-        {
-          "type": "field_dropdown",
-          "name": "KEY",
-          "options": [
-            ["↑", "ArrowUp"],
-            ["↓", "ArrowDown"],
-            ["←", "ArrowLeft"],
-            ["→", "ArrowRight"],
-            ["スペース", " "],
-            ["W", "w"],
-            ["A", "a"],
-            ["S", "s"],
-            ["D", "d"]
-          ]
-        }
-      ],
-      "output": "Boolean",
-      "colour": "#14b8a6"
-    }
+    {"type":"event_start","message0":"▶ はじまったとき %1 %2","args0":[{"type":"input_dummy"},{"type":"input_statement","name":"DO"}],"colour":40},
+    {"type":"event_forever","message0":"ずっと %1 %2","args0":[{"type":"input_dummy"},{"type":"input_statement","name":"DO"}],"colour":40},
+    {"type":"move_forward","message0":"前に %1 動く","args0":[{"type":"field_number","name":"AMOUNT","value":1,"precision":0.1}],"previousStatement":null,"nextStatement":null,"colour":210},
+    {"type":"turn_y","message0":"Y回転 %1 度","args0":[{"type":"field_number","name":"DEG","value":15,"precision":1}],"previousStatement":null,"nextStatement":null,"colour":210},
+    {"type":"go_to","message0":"座標 x %1 y %2 z %3 へ行く","args0":[{"type":"field_number","name":"X","value":0,"precision":0.1},{"type":"field_number","name":"Y","value":1,"precision":0.1},{"type":"field_number","name":"Z","value":0,"precision":0.1}],"previousStatement":null,"nextStatement":null,"colour":210},
+    {"type":"jump","message0":"ジャンプ 強さ %1","args0":[{"type":"field_number","name":"POWER","value":0.18,"precision":0.01}],"previousStatement":null,"nextStatement":null,"colour":210},
+    {"type":"set_color","message0":"色を %1 にする","args0":[{"type":"field_colour","name":"COLOR","colour":"#ff6b6b"}],"previousStatement":null,"nextStatement":null,"colour":270},
+    {"type":"set_scale","message0":"大きさを %1 倍にする","args0":[{"type":"field_number","name":"SCALE","value":1.2,"precision":0.1}],"previousStatement":null,"nextStatement":null,"colour":270},
+    {"type":"wait_seconds","message0":"%1 秒待つ","args0":[{"type":"field_number","name":"SEC","value":1,"precision":0.1}],"previousStatement":null,"nextStatement":null,"colour":330},
+    {"type":"key_pressed","message0":"キー %1 が押された","args0":[{"type":"field_dropdown","name":"KEY","options":[["↑","ArrowUp"],["↓","ArrowDown"],["←","ArrowLeft"],["→","ArrowRight"],["スペース"," "],["W","w"],["A","a"],["S","s"],["D","d"]]}],"output":"Boolean","colour":180}
   ]);
 }
-
-function initBlockly() {
+function initBlockly(){
   defineBlocklyBlocks();
-
   workspace = Blockly.inject("blocklyDiv", {
     toolbox: document.getElementById("toolbox"),
-    trashcan: true,
-    scrollbars: true,
-    zoom: {
-      controls: true,
-      wheel: true,
-      startScale: 0.9,
-      maxScale: 1.5,
-      minScale: 0.45,
-      scaleSpeed: 1.1
-    }
+    trashcan:true,
+    scrollbars:true,
+    zoom:{controls:true,wheel:true,startScale:.9,maxScale:1.5,minScale:.45,scaleSpeed:1.1}
   });
-
-  workspace.addChangeListener(() => {
-    if (isLoadingWorkspace) return;
-    const sprite = getSelectedSprite();
-    if (!sprite) return;
-    sprite.workspaceJson = Blockly.serialization.workspaces.save(workspace);
+  workspace.addChangeListener(()=>{
+    if(isLoadingWorkspace) return;
+    const s = getSelectedSprite();
+    if(s) s.workspaceJson = Blockly.serialization.workspaces.save(workspace);
   });
 }
 
-function defaultWorkspaceForSprite(kind) {
-  if (kind === "camera") {
-    return {
-      "blocks": {
-        "languageVersion": 0,
-        "blocks": [
-          {
-            "type": "event_start",
-            "id": uid(),
-            "x": 30,
-            "y": 30,
-            "inputs": {
-              "DO": {
-                "block": {
-                  "type": "go_to",
-                  "id": uid(),
-                  "fields": { "X": 0, "Y": 3, "Z": 8 }
-                }
-              }
-            }
-          }
-        ]
-      }
-    };
+function defaultWorkspace(kind){
+  if(kind==="camera"){
+    return {"blocks":{"languageVersion":0,"blocks":[{"type":"event_start","id":uid(),"x":30,"y":30,"inputs":{"DO":{"block":{"type":"go_to","id":uid(),"fields":{"X":0,"Y":3,"Z":8}}}}}]}};
   }
-
-  return {
-    "blocks": {
-      "languageVersion": 0,
-      "blocks": [
-        {
-          "type": "event_forever",
-          "id": uid(),
-          "x": 30,
-          "y": 30,
-          "inputs": {
-            "DO": {
-              "block": {
-                "type": "controls_if",
-                "id": uid(),
-                "inputs": {
-                  "IF0": {
-                    "block": {
-                      "type": "key_pressed",
-                      "id": uid(),
-                      "fields": { "KEY": "ArrowUp" }
-                    }
-                  },
-                  "DO0": {
-                    "block": {
-                      "type": "move_forward",
-                      "id": uid(),
-                      "fields": { "AMOUNT": 1 }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    }
-  };
+  return {"blocks":{"languageVersion":0,"blocks":[{"type":"event_forever","id":uid(),"x":30,"y":30,"inputs":{"DO":{"block":{"type":"controls_if","id":uid(),"inputs":{"IF0":{"block":{"type":"key_pressed","id":uid(),"fields":{"KEY":"ArrowUp"}}},"DO0":{"block":{"type":"move_forward","id":uid(),"fields":{"AMOUNT":1}}}}}}}}]}};
 }
-
-function loadSpriteWorkspace(sprite) {
-  if (!workspace) return;
-
+function loadWorkspaceFor(s){
   isLoadingWorkspace = true;
   workspace.clear();
-
-  try {
-    Blockly.serialization.workspaces.load(sprite.workspaceJson || defaultWorkspaceForSprite(sprite.kind), workspace);
-  } catch (e) {
-    console.error(e);
-    Blockly.serialization.workspaces.load(defaultWorkspaceForSprite(sprite.kind), workspace);
-  }
-
+  try { Blockly.serialization.workspaces.load(s.workspaceJson || defaultWorkspace(s.kind), workspace); }
+  catch(e){ console.warn(e); Blockly.serialization.workspaces.load(defaultWorkspace(s.kind), workspace); }
   isLoadingWorkspace = false;
-  blocklyTargetNameEl.textContent = sprite.name;
+  blocklyTargetNameEl.textContent = s.name;
 }
 
-/* ---------------------------
-   Sprite
---------------------------- */
-
-function addSprite(kind = "box") {
+function addSprite(kind){
   const id = uid();
   const color = colorForKind(kind);
-  const object = createObject(kind, color);
-
-  object.position.set((sprites.length % 5) * 1.6, kind === "camera" ? 3 : 0.75, kind === "camera" ? 8 : Math.floor(sprites.length / 5) * 1.6);
-  if (kind === "camera") object.rotation.x = THREE.MathUtils.degToRad(-15);
-
-  object.traverse(child => {
-    child.userData.spriteId = id;
-  });
+  const object = createObject(kind,color);
+  object.position.set((sprites.length%5)*1.6, kind==="camera"?3:.75, kind==="camera"?8:Math.floor(sprites.length/5)*1.6);
+  if(kind==="camera") object.rotation.x = THREE.MathUtils.degToRad(-15);
   object.userData.spriteId = id;
-
+  object.traverse(c=>c.userData.spriteId=id);
   scene.add(object);
-
-  const sprite = {
-    id,
-    name: kind === "camera" ? "Camera" : kindName(kind) + " " + (sprites.filter(s => s.kind !== "camera").length + 1),
-    kind,
-    color,
-    object,
-    velocityY: 0,
-    waitTimer: 0,
-    workspaceJson: defaultWorkspaceForSprite(kind),
-    startDone: false
-  };
-
+  const sprite = {id,name:kind==="camera"?"Camera":kindName(kind)+" "+(sprites.filter(s=>s.kind!=="camera").length+1),kind,color,object,velocityY:0,waitTimer:0,startDone:false,workspaceJson:defaultWorkspace(kind)};
   sprites.push(sprite);
   selectSprite(id);
 }
-
-function addInitialCamera() {
-  if (sprites.some(s => s.kind === "camera")) return;
-  addSprite("camera");
-}
-
-function colorForKind(kind) {
-  if (kind === "sphere") return "#f97316";
-  if (kind === "cylinder") return "#06b6d4";
-  if (kind === "capsule") return "#22c55e";
-  if (kind === "cone") return "#eab308";
-  if (kind === "camera") return "#111827";
-  return "#3b82f6";
-}
-
-function kindName(kind) {
-  const map = {
-    box: "直方体",
-    sphere: "球",
-    cylinder: "円柱",
-    capsule: "Capsule",
-    cone: "円すい",
-    camera: "カメラ"
-  };
-  return map[kind] || kind;
-}
-
-function selectSprite(id) {
+function addInitialCamera(){ if(!sprites.some(s=>s.kind==="camera")) addSprite("camera"); }
+function getSelectedSprite(){ return sprites.find(s=>s.id===selectedSpriteId)||null; }
+function getGameCameraSprite(){ return sprites.find(s=>s.kind==="camera")||null; }
+function selectSprite(id){
+  if(workspace && getSelectedSprite()) getSelectedSprite().workspaceJson = Blockly.serialization.workspaces.save(workspace);
   selectedSpriteId = id;
-  const sprite = getSelectedSprite();
-  if (sprite) {
-    transformControls.attach(sprite.object);
-    loadSpriteWorkspace(sprite);
-  }
-  renderAllPanels();
+  const s = getSelectedSprite();
+  if(s) loadWorkspaceFor(s);
+  renderAll();
 }
-
-function getSelectedSprite() {
-  return sprites.find(sprite => sprite.id === selectedSpriteId) || null;
-}
-
-function getGameCameraSprite() {
-  return sprites.find(sprite => sprite.kind === "camera") || null;
-}
-
-function renderAllPanels() {
-  renderSpriteList();
-  renderProps();
-}
-
-function renderSpriteList() {
+function renderAll(){ renderSpriteList(); renderProps(); updateGizmo(); }
+function renderSpriteList(){
   spriteListEl.innerHTML = "";
-
-  for (const sprite of sprites) {
+  for(const s of sprites){
     const item = document.createElement("div");
-    item.className = "spriteItem" + (sprite.id === selectedSpriteId ? " active" : "");
-    item.onclick = () => selectSprite(sprite.id);
-
+    item.className = "spriteItem" + (s.id===selectedSpriteId?" active":"");
+    item.onclick = ()=>selectSprite(s.id);
     const thumb = document.createElement("div");
     thumb.className = "spriteThumb";
-    thumb.style.background = sprite.color;
-    thumb.textContent = sprite.kind === "camera" ? "📷" : "3D";
-
+    thumb.style.background = s.color;
+    thumb.textContent = s.kind==="camera"?"📷":"3D";
     const info = document.createElement("div");
     info.className = "spriteInfo";
-
-    const name = document.createElement("div");
-    name.className = "spriteName";
-    name.textContent = sprite.name;
-
-    const kind = document.createElement("div");
-    kind.className = "spriteKind";
-    kind.textContent = kindName(sprite.kind);
-
-    info.append(name, kind);
-    item.append(thumb, info);
+    info.innerHTML = `<div class="spriteName"></div><div class="spriteKind">${kindName(s.kind)}</div>`;
+    info.querySelector(".spriteName").textContent = s.name;
+    item.append(thumb,info);
     spriteListEl.append(item);
   }
 }
-
-function renderProps() {
-  const sprite = getSelectedSprite();
-  if (!sprite) {
-    selectedSpriteNameEl.textContent = "未選択";
-    blocklyTargetNameEl.textContent = "未選択";
-    propName.value = "";
-    propX.value = "";
-    propY.value = "";
-    propZ.value = "";
-    return;
-  }
-
-  selectedSpriteNameEl.textContent = sprite.name;
-  blocklyTargetNameEl.textContent = sprite.name;
-  propName.value = sprite.name;
-  propX.value = sprite.object.position.x.toFixed(1);
-  propY.value = sprite.object.position.y.toFixed(1);
-  propZ.value = sprite.object.position.z.toFixed(1);
-  propColor.value = sprite.color;
+function renderProps(){
+  const s = getSelectedSprite();
+  if(!s){ selectedSpriteNameEl.textContent="未選択"; return; }
+  selectedSpriteNameEl.textContent = s.name;
+  blocklyTargetNameEl.textContent = s.name;
+  propName.value=s.name;
+  propX.value=s.object.position.x.toFixed(1);
+  propY.value=s.object.position.y.toFixed(1);
+  propZ.value=s.object.position.z.toFixed(1);
+  propColor.value=s.color;
 }
-
-function applyProps() {
-  const sprite = getSelectedSprite();
-  if (!sprite) return;
-
-  sprite.name = propName.value || "Sprite";
-  sprite.object.position.set(
-    Number(propX.value) || 0,
-    Number(propY.value) || 0,
-    Number(propZ.value) || 0
-  );
-
-  sprite.color = propColor.value || "#3b82f6";
-
-  if (sprite.kind !== "camera") {
-    sprite.object.material.color.set(sprite.color);
-  } else {
-    sprite.object.traverse(child => {
-      if (child.isMesh && child.material && child.material.color) {
-        child.material.color.set(sprite.color);
-      }
-    });
-  }
-
+function applyProps(){
+  const s = getSelectedSprite();
+  if(!s) return;
+  s.name = propName.value || "Sprite";
+  s.object.position.set(Number(propX.value)||0,Number(propY.value)||0,Number(propZ.value)||0);
+  s.color = propColor.value || "#3b82f6";
+  setObjectColor(s);
   renderSpriteList();
-  selectedSpriteNameEl.textContent = sprite.name;
-  blocklyTargetNameEl.textContent = sprite.name;
+  updateGizmo();
 }
-
-function syncSelectedFromTransform() {
-  renderProps();
-}
-
-/* ---------------------------
-   Blockly execution
---------------------------- */
-
-function topBlocksFor(sprite, type) {
-  const json = sprite.workspaceJson;
-  const blocks = json?.blocks?.blocks || [];
-  return blocks.filter(b => b.type === type);
-}
-
-function getConnectedBlock(inputObj) {
-  if (!inputObj) return null;
-  return inputObj.block || null;
-}
-
-function execStatementChain(sprite, block, dt) {
-  let current = block;
-  let guard = 0;
-
-  while (current && guard < 200) {
-    guard++;
-    const shouldContinue = execOneBlock(sprite, current, dt);
-    if (shouldContinue === "WAIT") return "WAIT";
-    current = current.next?.block || null;
-  }
-
-  return "DONE";
-}
-
-function execOneBlock(sprite, block, dt) {
-  if (!block) return "DONE";
-
-  if (block.type === "move_forward") {
-    const amount = Number(block.fields?.AMOUNT ?? 1);
-    const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(sprite.object.quaternion);
-    sprite.object.position.addScaledVector(forward, amount * dt * 3);
-  }
-
-  if (block.type === "turn_y") {
-    const deg = Number(block.fields?.DEG ?? 15);
-    sprite.object.rotation.y += THREE.MathUtils.degToRad(deg) * dt * 4;
-  }
-
-  if (block.type === "go_to") {
-    sprite.object.position.set(
-      Number(block.fields?.X ?? 0),
-      Number(block.fields?.Y ?? 1),
-      Number(block.fields?.Z ?? 0)
-    );
-  }
-
-  if (block.type === "jump") {
-    if (sprite.object.position.y <= 0.76) {
-      sprite.velocityY = Number(block.fields?.POWER ?? 0.18);
-    }
-  }
-
-  if (block.type === "set_color") {
-    const color = block.fields?.COLOR || "#ff6b6b";
-    sprite.color = color;
-
-    if (sprite.kind !== "camera" && sprite.object.material) {
-      sprite.object.material.color.set(color);
-    }
-  }
-
-  if (block.type === "set_scale") {
-    const s = Math.max(0.1, Number(block.fields?.SCALE ?? 1));
-    sprite.object.scale.setScalar(s);
-  }
-
-  if (block.type === "wait_seconds") {
-    if (sprite.waitTimer <= 0) {
-      sprite.waitTimer = Math.max(0, Number(block.fields?.SEC ?? 1));
-    }
-
-    sprite.waitTimer -= dt;
-    if (sprite.waitTimer > 0) return "WAIT";
-    sprite.waitTimer = 0;
-  }
-
-  if (block.type === "controls_if") {
-    const conditionBlock = getConnectedBlock(block.inputs?.IF0);
-    const doBlock = getConnectedBlock(block.inputs?.DO0);
-
-    if (evalBoolBlock(conditionBlock)) {
-      const result = execStatementChain(sprite, doBlock, dt);
-      if (result === "WAIT") return "WAIT";
-    }
-  }
-
-  return "DONE";
-}
-
-function evalBoolBlock(block) {
-  if (!block) return false;
-
-  if (block.type === "key_pressed") {
-    const key = block.fields?.KEY || "ArrowUp";
-    return pressedKeys.has(key);
-  }
-
-  if (block.type === "logic_boolean") {
-    return block.fields?.BOOL === "TRUE";
-  }
-
-  if (block.type === "logic_compare") {
-    const left = evalValueBlock(getConnectedBlock(block.inputs?.A));
-    const right = evalValueBlock(getConnectedBlock(block.inputs?.B));
-    const op = block.fields?.OP || "EQ";
-
-    if (op === "EQ") return left === right;
-    if (op === "NEQ") return left !== right;
-    if (op === "LT") return left < right;
-    if (op === "LTE") return left <= right;
-    if (op === "GT") return left > right;
-    if (op === "GTE") return left >= right;
-  }
-
-  return false;
-}
-
-function evalValueBlock(block) {
-  if (!block) return 0;
-  if (block.type === "math_number") return Number(block.fields?.NUM || 0);
-  if (block.type === "logic_boolean") return block.fields?.BOOL === "TRUE";
-  return 0;
-}
-
-function executeSprite(sprite, dt) {
-  if (!sprite.workspaceJson) return;
-
-  if (!sprite.startDone) {
-    for (const start of topBlocksFor(sprite, "event_start")) {
-      const first = getConnectedBlock(start.inputs?.DO);
-      execStatementChain(sprite, first, dt);
-    }
-    sprite.startDone = true;
-  }
-
-  for (const forever of topBlocksFor(sprite, "event_forever")) {
-    const first = getConnectedBlock(forever.inputs?.DO);
-    execStatementChain(sprite, first, dt);
-  }
-}
-
-function updatePhysics(sprite) {
-  if (sprite.kind === "camera") return;
-
-  sprite.velocityY -= 0.012;
-  sprite.object.position.y += sprite.velocityY;
-
-  if (sprite.object.position.y < 0.75) {
-    sprite.object.position.y = 0.75;
-    sprite.velocityY = 0;
-  }
-}
-
-/* ---------------------------
-   UI
---------------------------- */
-
-function setTransformMode(mode) {
-  transformControls.setMode(mode);
-
-  document.querySelectorAll(".tool").forEach(btn => btn.classList.remove("active"));
-  if (mode === "translate") document.getElementById("modeMoveBtn").classList.add("active");
-  if (mode === "rotate") document.getElementById("modeRotateBtn").classList.add("active");
-  if (mode === "scale") document.getElementById("modeScaleBtn").classList.add("active");
-}
-
-function openModal() {
-  modal.classList.remove("hidden");
-}
-
-function closeModal() {
-  modal.classList.add("hidden");
-}
-
-function deleteSelectedSprite() {
-  const sprite = getSelectedSprite();
-  if (!sprite) return;
-
-  if (sprite.kind === "camera" && sprites.filter(s => s.kind === "camera").length <= 1) {
-    alert("カメラは最低1つ必要です。");
-    return;
-  }
-
-  transformControls.detach();
-  scene.remove(sprite.object);
-  disposeObject(sprite.object);
-
-  sprites = sprites.filter(s => s.id !== sprite.id);
-  selectedSpriteId = sprites[0]?.id || null;
-
-  if (selectedSpriteId) {
-    selectSprite(selectedSpriteId);
-  } else {
-    renderAllPanels();
-  }
-}
-
-function disposeObject(object) {
-  object.traverse(child => {
-    if (child.geometry) child.geometry.dispose();
-    if (child.material) {
-      if (Array.isArray(child.material)) {
-        child.material.forEach(m => m.dispose());
-      } else {
-        child.material.dispose();
-      }
-    }
+function setObjectColor(s){
+  s.object.traverse(c=>{
+    if(c.isMesh && c.material && c.material.color) c.material.color.set(s.color);
   });
 }
 
-function runProject() {
-  if (workspace && getSelectedSprite()) {
-    getSelectedSprite().workspaceJson = Blockly.serialization.workspaces.save(workspace);
-  }
-
-  running = true;
-  editCameraEnabled = false;
-  statusEl.textContent = "実行中";
-  transformControls.detach();
-
-  for (const sprite of sprites) {
-    sprite.velocityY = 0;
-    sprite.waitTimer = 0;
-    sprite.startDone = false;
-  }
+function makeGizmoLine(name, color, end){
+  const mat = new THREE.LineBasicMaterial({color});
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), end]);
+  const line = new THREE.Line(geo, mat);
+  line.name = name;
+  return line;
+}
+const xLine = makeGizmoLine("x",0xff3333,new THREE.Vector3(1.8,0,0));
+const yLine = makeGizmoLine("y",0x33cc33,new THREE.Vector3(0,1.8,0));
+const zLine = makeGizmoLine("z",0x3366ff,new THREE.Vector3(0,0,1.8));
+gizmo.add(xLine,yLine,zLine);
+function updateGizmo(){
+  const s = getSelectedSprite();
+  gizmo.visible = !!s && !running;
+  if(!s) return;
+  gizmo.position.copy(s.object.position);
+  gizmo.rotation.set(0,0,0);
+  const scale = editMode==="scale" ? 1.3 : 1;
+  gizmo.scale.setScalar(scale);
 }
 
-function stopProject() {
-  running = false;
-  editCameraEnabled = true;
-  statusEl.textContent = "停止中";
-
-  const sprite = getSelectedSprite();
-  if (sprite) transformControls.attach(sprite.object);
-}
-
-function saveProject() {
-  if (workspace && getSelectedSprite()) {
-    getSelectedSprite().workspaceJson = Blockly.serialization.workspaces.save(workspace);
-  }
-
-  const data = {
-    sprites: sprites.map(sprite => ({
-      id: sprite.id,
-      name: sprite.name,
-      kind: sprite.kind,
-      color: sprite.color,
-      position: sprite.object.position.toArray(),
-      rotation: [sprite.object.rotation.x, sprite.object.rotation.y, sprite.object.rotation.z],
-      scale: sprite.object.scale.toArray(),
-      workspaceJson: sprite.workspaceJson
-    }))
-  };
-
-  localStorage.setItem("scratch3d-blockly-project", JSON.stringify(data));
-  alert("保存しました！");
-}
-
-function loadProject() {
-  const raw = localStorage.getItem("scratch3d-blockly-project");
-  if (!raw) {
-    alert("保存データがありません。");
+let draggingAxis = null;
+let dragStart = null;
+let objectStart = null;
+stageWrap.addEventListener("pointerdown", e=>{
+  if(running) return;
+  const rect = stageWrap.getBoundingClientRect();
+  pointer.x = ((e.clientX-rect.left)/rect.width)*2-1;
+  pointer.y = -((e.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer, previewCamera);
+  const gizHits = raycaster.intersectObjects(gizmo.children, false);
+  if(gizHits.length){
+    draggingAxis = gizHits[0].object.name;
+    dragStart = {x:e.clientX,y:e.clientY};
+    objectStart = getSelectedSprite().object.clone();
+    controls.enabled = false;
+    stageWrap.setPointerCapture(e.pointerId);
     return;
   }
-
-  const data = JSON.parse(raw);
-  clearSpritesOnly();
-
-  for (const saved of data.sprites || []) {
-    restoreSprite(saved);
+  const meshes = [];
+  for(const s of sprites) s.object.traverse(c=>{ if(c.isMesh) meshes.push(c); });
+  const hits = raycaster.intersectObjects(meshes,false);
+  if(hits.length){
+    const id = hits[0].object.userData.spriteId;
+    if(id) selectSprite(id);
   }
+});
+stageWrap.addEventListener("pointermove", e=>{
+  if(!draggingAxis) return;
+  const s = getSelectedSprite();
+  if(!s) return;
+  const dx = (e.clientX - dragStart.x) * 0.02;
+  const dy = (e.clientY - dragStart.y) * 0.02;
+  const amount = draggingAxis === "y" ? -dy : dx;
+  if(editMode==="translate"){
+    s.object.position.copy(objectStart.position);
+    if(draggingAxis==="x") s.object.position.x += amount;
+    if(draggingAxis==="y") s.object.position.y += amount;
+    if(draggingAxis==="z") s.object.position.z += amount;
+  } else if(editMode==="rotate"){
+    s.object.rotation.copy(objectStart.rotation);
+    if(draggingAxis==="x") s.object.rotation.x += amount;
+    if(draggingAxis==="y") s.object.rotation.y += amount;
+    if(draggingAxis==="z") s.object.rotation.z += amount;
+  } else if(editMode==="scale"){
+    const sc = Math.max(.1, objectStart.scale.x + amount);
+    s.object.scale.setScalar(sc);
+  }
+  renderProps();
+  updateGizmo();
+});
+stageWrap.addEventListener("pointerup", e=>{
+  draggingAxis = null;
+  controls.enabled = true;
+  try{ stageWrap.releasePointerCapture(e.pointerId); }catch(_){}
+});
 
-  addInitialCamera();
-
-  selectedSpriteId = sprites[0]?.id || null;
-  if (selectedSpriteId) selectSprite(selectedSpriteId);
-  renderAllPanels();
+function setMode(mode){
+  editMode = mode;
+  document.querySelectorAll(".tool").forEach(b=>b.classList.remove("active"));
+  if(mode==="translate") document.getElementById("modeMoveBtn").classList.add("active");
+  if(mode==="rotate") document.getElementById("modeRotateBtn").classList.add("active");
+  if(mode==="scale") document.getElementById("modeScaleBtn").classList.add("active");
+  updateGizmo();
 }
 
-function restoreSprite(saved) {
+function topBlocksFor(s,type){ return s.workspaceJson?.blocks?.blocks?.filter(b=>b.type===type) || []; }
+function child(input){ return input?.block || null; }
+function execChain(s, block, dt){
+  let cur = block, guard=0;
+  while(cur && guard++<200){
+    const res = execOne(s,cur,dt);
+    if(res==="WAIT") return "WAIT";
+    cur = cur.next?.block || null;
+  }
+  return "DONE";
+}
+function execOne(s,b,dt){
+  if(!b) return "DONE";
+  if(b.type==="move_forward"){
+    const amount = Number(b.fields?.AMOUNT ?? 1);
+    const f = new THREE.Vector3(0,0,-1).applyQuaternion(s.object.quaternion);
+    s.object.position.addScaledVector(f, amount*dt*3);
+  }
+  if(b.type==="turn_y") s.object.rotation.y += THREE.MathUtils.degToRad(Number(b.fields?.DEG ?? 15))*dt*4;
+  if(b.type==="go_to") s.object.position.set(Number(b.fields?.X??0),Number(b.fields?.Y??1),Number(b.fields?.Z??0));
+  if(b.type==="jump" && s.object.position.y<=.76) s.velocityY = Number(b.fields?.POWER ?? .18);
+  if(b.type==="set_color"){ s.color=b.fields?.COLOR || "#ff6b6b"; setObjectColor(s); }
+  if(b.type==="set_scale"){ const sc=Math.max(.1,Number(b.fields?.SCALE??1)); s.object.scale.setScalar(sc); }
+  if(b.type==="wait_seconds"){
+    if(s.waitTimer<=0) s.waitTimer=Math.max(0,Number(b.fields?.SEC??1));
+    s.waitTimer-=dt;
+    if(s.waitTimer>0) return "WAIT";
+    s.waitTimer=0;
+  }
+  if(b.type==="controls_if"){
+    if(evalBool(child(b.inputs?.IF0))){
+      const r=execChain(s,child(b.inputs?.DO0),dt);
+      if(r==="WAIT") return "WAIT";
+    }
+  }
+  return "DONE";
+}
+function evalBool(b){
+  if(!b) return false;
+  if(b.type==="key_pressed") return pressedKeys.has(b.fields?.KEY || "ArrowUp");
+  if(b.type==="logic_boolean") return b.fields?.BOOL==="TRUE";
+  return false;
+}
+function executeSprite(s,dt){
+  if(!s.startDone){
+    for(const b of topBlocksFor(s,"event_start")) execChain(s,child(b.inputs?.DO),dt);
+    s.startDone = true;
+  }
+  for(const b of topBlocksFor(s,"event_forever")) execChain(s,child(b.inputs?.DO),dt);
+}
+function updatePhysics(s){
+  if(s.kind==="camera") return;
+  s.velocityY -= .012;
+  s.object.position.y += s.velocityY;
+  if(s.object.position.y<.75){ s.object.position.y=.75; s.velocityY=0; }
+}
+function runProject(){
+  const s = getSelectedSprite();
+  if(workspace && s) s.workspaceJson = Blockly.serialization.workspaces.save(workspace);
+  running=true; statusEl.textContent="実行中"; gizmo.visible=false;
+  for(const sp of sprites){ sp.velocityY=0; sp.waitTimer=0; sp.startDone=false; }
+}
+function stopProject(){ running=false; statusEl.textContent="停止中"; updateGizmo(); }
+
+function saveProject(){
+  const s = getSelectedSprite();
+  if(workspace && s) s.workspaceJson = Blockly.serialization.workspaces.save(workspace);
+  const data = {sprites:sprites.map(s=>({id:s.id,name:s.name,kind:s.kind,color:s.color,position:s.object.position.toArray(),rotation:[s.object.rotation.x,s.object.rotation.y,s.object.rotation.z],scale:s.object.scale.toArray(),workspaceJson:s.workspaceJson}))};
+  localStorage.setItem("scratch3d-blockly-fixed", JSON.stringify(data));
+  alert("保存しました！");
+}
+function loadProject(){
+  const raw = localStorage.getItem("scratch3d-blockly-fixed");
+  if(!raw){ alert("保存データがありません。"); return; }
+  clearSpritesOnly();
+  const data = JSON.parse(raw);
+  for(const saved of data.sprites || []) restoreSprite(saved);
+  addInitialCamera();
+  selectSprite(sprites[0].id);
+}
+function restoreSprite(saved){
   const id = saved.id || uid();
   const color = saved.color || colorForKind(saved.kind);
   const object = createObject(saved.kind || "box", color);
-
-  object.position.fromArray(saved.position || [0, 0.75, 0]);
-  if (saved.rotation) object.rotation.set(saved.rotation[0], saved.rotation[1], saved.rotation[2]);
-  if (saved.scale) object.scale.fromArray(saved.scale);
-
-  object.traverse(child => {
-    child.userData.spriteId = id;
-  });
-  object.userData.spriteId = id;
+  object.position.fromArray(saved.position || [0,.75,0]);
+  if(saved.rotation) object.rotation.set(saved.rotation[0],saved.rotation[1],saved.rotation[2]);
+  if(saved.scale) object.scale.fromArray(saved.scale);
+  object.userData.spriteId=id; object.traverse(c=>c.userData.spriteId=id);
   scene.add(object);
-
-  sprites.push({
-    id,
-    name: saved.name || kindName(saved.kind || "box"),
-    kind: saved.kind || "box",
-    color,
-    object,
-    velocityY: 0,
-    waitTimer: 0,
-    startDone: false,
-    workspaceJson: saved.workspaceJson || defaultWorkspaceForSprite(saved.kind || "box")
-  });
+  sprites.push({id,name:saved.name||kindName(saved.kind),kind:saved.kind||"box",color,object,velocityY:0,waitTimer:0,startDone:false,workspaceJson:saved.workspaceJson||defaultWorkspace(saved.kind||"box")});
+}
+function clearSpritesOnly(){
+  for(const s of sprites){ scene.remove(s.object); s.object.traverse(c=>{ if(c.geometry)c.geometry.dispose(); if(c.material)c.material.dispose?.(); }); }
+  sprites=[]; selectedSpriteId=null;
+}
+function clearProject(){ if(confirm("全部消しますか？")){ clearSpritesOnly(); addInitialCamera(); addSprite("box"); } }
+function deleteSelected(){
+  const s=getSelectedSprite(); if(!s)return;
+  if(s.kind==="camera" && sprites.filter(x=>x.kind==="camera").length<=1){ alert("カメラは最低1つ必要です。"); return; }
+  scene.remove(s.object);
+  sprites=sprites.filter(x=>x.id!==s.id);
+  selectedSpriteId=sprites[0]?.id || null;
+  if(selectedSpriteId) selectSprite(selectedSpriteId); else renderAll();
 }
 
-function clearSpritesOnly() {
-  transformControls.detach();
-
-  for (const sprite of sprites) {
-    scene.remove(sprite.object);
-    disposeObject(sprite.object);
-  }
-
-  sprites = [];
-  selectedSpriteId = null;
-}
-
-function clearProject() {
-  if (!confirm("全部消しますか？")) return;
-  clearSpritesOnly();
-  addInitialCamera();
-  addSprite("box");
-}
-
-/* ---------------------------
-   Input / Picking
---------------------------- */
-
-stageWrap.addEventListener("pointerdown", (e) => {
-  if (running) return;
-  if (transformControls.dragging) return;
-
-  const rect = stageWrap.getBoundingClientRect();
-  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-  raycaster.setFromCamera(pointer, previewCamera);
-
-  const candidates = [];
-  for (const sprite of sprites) {
-    sprite.object.traverse(child => {
-      if (child.isMesh) candidates.push(child);
-    });
-  }
-
-  const hits = raycaster.intersectObjects(candidates, false);
-  if (hits.length > 0) {
-    let obj = hits[0].object;
-    const id = obj.userData.spriteId;
-    if (id) selectSprite(id);
-  }
-});
-
-window.addEventListener("keydown", e => {
-  pressedKeys.add(e.key);
-
-  if (e.key === "ArrowUp") pressedKeys.add("ArrowUp");
-  if (e.key === "ArrowDown") pressedKeys.add("ArrowDown");
-  if (e.key === "ArrowLeft") pressedKeys.add("ArrowLeft");
-  if (e.key === "ArrowRight") pressedKeys.add("ArrowRight");
-
-  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
-    e.preventDefault();
-  }
-});
-
-window.addEventListener("keyup", e => {
-  pressedKeys.delete(e.key);
-});
-
-/* ---------------------------
-   Render loop
---------------------------- */
-
-function resizeRenderer() {
-  const rect = stageWrap.getBoundingClientRect();
-  const width = Math.max(1, Math.floor(rect.width));
-  const height = Math.max(1, Math.floor(rect.height));
-
-  renderer.setSize(width, height, false);
-
-  previewCamera.aspect = width / height;
-  previewCamera.updateProjectionMatrix();
-
-  gameCamera.aspect = width / height;
-  gameCamera.updateProjectionMatrix();
-
-  if (workspace) Blockly.svgResize(workspace);
-}
-
-function syncGameCameraFromSprite() {
-  const camSprite = getGameCameraSprite();
-  if (!camSprite) return previewCamera;
-
-  gameCamera.position.copy(camSprite.object.position);
-  gameCamera.quaternion.copy(camSprite.object.quaternion);
+function syncGameCamera(){
+  const cam = getGameCameraSprite();
+  if(!cam) return previewCamera;
+  gameCamera.position.copy(cam.object.position);
+  gameCamera.quaternion.copy(cam.object.quaternion);
   return gameCamera;
 }
-
-function animate(time) {
+function resize(){
+  const r=stageWrap.getBoundingClientRect();
+  const w=Math.max(1,Math.floor(r.width)), h=Math.max(1,Math.floor(r.height));
+  renderer.setSize(w,h,false);
+  previewCamera.aspect=w/h; previewCamera.updateProjectionMatrix();
+  gameCamera.aspect=w/h; gameCamera.updateProjectionMatrix();
+  if(workspace) Blockly.svgResize(workspace);
+}
+function animate(time){
   requestAnimationFrame(animate);
-  resizeRenderer();
-
-  const dt = Math.min(0.05, (time - lastTime) / 1000 || 0);
-  lastTime = time;
-
-  if (running) {
-    for (const sprite of sprites) {
-      executeSprite(sprite, dt);
-      updatePhysics(sprite);
-    }
+  resize();
+  const dt=Math.min(.05,(time-lastTime)/1000||0); lastTime=time;
+  if(running){
+    for(const s of sprites){ executeSprite(s,dt); updatePhysics(s); }
     renderProps();
   }
-
   controls.update();
-
-  const activeCamera = running ? syncGameCameraFromSprite() : previewCamera;
-  renderer.render(scene, activeCamera);
+  updateGizmo();
+  renderer.render(scene, running ? syncGameCamera() : previewCamera);
 }
 
-/* ---------------------------
-   Events
---------------------------- */
+document.getElementById("runBtn").onclick=runProject;
+document.getElementById("stopBtn").onclick=stopProject;
+document.getElementById("saveBtn").onclick=saveProject;
+document.getElementById("loadBtn").onclick=loadProject;
+document.getElementById("clearBtn").onclick=clearProject;
+document.getElementById("deleteSpriteBtn").onclick=deleteSelected;
+document.getElementById("modeMoveBtn").onclick=()=>setMode("translate");
+document.getElementById("modeRotateBtn").onclick=()=>setMode("rotate");
+document.getElementById("modeScaleBtn").onclick=()=>setMode("scale");
+document.getElementById("camResetBtn").onclick=()=>{ previewCamera.position.set(7,5,8); controls.target.set(0,1,0); };
+document.getElementById("openAddSpriteBtn").onclick=()=>modal.classList.remove("hidden");
+document.getElementById("closeModalBtn").onclick=()=>modal.classList.add("hidden");
+modal.addEventListener("click",e=>{ if(e.target===modal) modal.classList.add("hidden"); });
+document.querySelectorAll(".choice").forEach(btn=>btn.onclick=()=>{ addSprite(btn.dataset.kind); modal.classList.add("hidden"); });
+[propName,propX,propY,propZ,propColor].forEach(i=>i.addEventListener("input",applyProps));
 
-document.getElementById("runBtn").onclick = runProject;
-document.getElementById("stopBtn").onclick = stopProject;
-document.getElementById("saveBtn").onclick = saveProject;
-document.getElementById("loadBtn").onclick = loadProject;
-document.getElementById("clearBtn").onclick = clearProject;
-
-document.getElementById("modeMoveBtn").onclick = () => setTransformMode("translate");
-document.getElementById("modeRotateBtn").onclick = () => setTransformMode("rotate");
-document.getElementById("modeScaleBtn").onclick = () => setTransformMode("scale");
-
-document.getElementById("camResetBtn").onclick = () => {
-  previewCamera.position.set(7, 5, 8);
-  controls.target.set(0, 1, 0);
-};
-
-document.getElementById("openAddSpriteBtn").onclick = openModal;
-document.getElementById("closeModalBtn").onclick = closeModal;
-modal.addEventListener("click", (e) => {
-  if (e.target === modal) closeModal();
-});
-
-document.querySelectorAll(".choice").forEach(btn => {
-  btn.addEventListener("click", () => {
-    addSprite(btn.dataset.kind);
-    closeModal();
-  });
-});
-
-document.getElementById("deleteSpriteBtn").onclick = deleteSelectedSprite;
-
-[propName, propX, propY, propZ, propColor].forEach(input => {
-  input.addEventListener("input", applyProps);
-});
-
-/* ---------------------------
-   Start
---------------------------- */
+window.addEventListener("keydown", e=>{ pressedKeys.add(e.key); if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault(); });
+window.addEventListener("keyup", e=>pressedKeys.delete(e.key));
 
 initBlockly();
 addInitialCamera();
 addSprite("box");
-setTransformMode("translate");
+setMode("translate");
 requestAnimationFrame(animate);
+
+} catch (err) {
+  showError(err);
+}

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Scratch風 3Dゲームメーカー Blockly版</title>
+  <title>Scratch風 3Dゲームメーカー Blockly修正版</title>
   <link rel="stylesheet" href="style.css" />
 
   <script type="importmap">
@@ -15,13 +15,15 @@
   }
   </script>
 
-  <script src="https://cdn.jsdelivr.net/npm/blockly@10.4.3/blockly_compressed.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/blockly@10.4.3/blocks_compressed.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/blockly@10.4.3/msg/ja.js"></script>
+  <!-- Blocklyは1本読み込みにして安定化 -->
+  <script src="https://unpkg.com/blockly/blockly.min.js"></script>
+  <script src="https://unpkg.com/blockly/msg/ja.js"></script>
 </head>
 <body>
+  <div id="errorBox" class="errorBox hidden"></div>
+
   <header class="topbar">
-    <div class="brand">🧊 Scratch風 3Dゲームメーカー <span>Blockly版</span></div>
+    <div class="brand">🧊 Scratch風 3Dゲームメーカー <span>Blockly修正版</span></div>
     <div class="topActions">
       <button id="runBtn" class="primary">▶ 実行</button>
       <button id="stopBtn">■ 停止</button>
@@ -48,9 +50,7 @@
 
       <div id="stageWrap">
         <canvas id="stage"></canvas>
-        <div class="stageHint">
-          選択中：<span id="selectedSpriteName">未選択</span>
-        </div>
+        <div class="stageHint">選択中：<span id="selectedSpriteName">未選択</span></div>
       </div>
     </section>
 
@@ -75,10 +75,10 @@
 
       <div class="panelTitle small">説明</div>
       <p class="note">
-        ・カメラは最初からあります。<br>
-        ・実行中は「カメラ」スプライトの位置と向きが画面に反映されます。<br>
-        ・カメラの白い線が向いている方向です。<br>
-        ・ステージ上の選択スプライトは、移動/向き/スケールで直接編集できます。
+        ・最初からCameraがあります。<br>
+        ・実行中はCameraの位置と向きが画面になります。<br>
+        ・白い線がCameraの向きです。<br>
+        ・ステージ上のスプライトを選んで移動/回転/スケールできます。
       </p>
     </section>
 
@@ -97,7 +97,6 @@
         <strong>追加するスプライトを選ぶ</strong>
         <button id="closeModalBtn">×</button>
       </div>
-
       <div class="spriteChoices">
         <button class="choice" data-kind="box">▭<span>直方体</span></button>
         <button class="choice" data-kind="sphere">●<span>球</span></button>
@@ -109,50 +108,26 @@
   </div>
 
   <xml id="toolbox" style="display:none">
-    <category name="イベント" colour="#f59e0b">
+    <category name="イベント" colour="40">
       <block type="event_start"></block>
       <block type="event_forever"></block>
     </category>
-
-    <category name="制御" colour="#ec4899">
+    <category name="制御" colour="330">
       <block type="controls_if"></block>
-      <block type="logic_compare"></block>
-      <block type="logic_boolean"></block>
-      <block type="wait_seconds">
-        <field name="SEC">1</field>
-      </block>
+      <block type="wait_seconds"><field name="SEC">1</field></block>
     </category>
-
-    <category name="入力" colour="#14b8a6">
-      <block type="key_pressed">
-        <field name="KEY">ArrowUp</field>
-      </block>
+    <category name="入力" colour="180">
+      <block type="key_pressed"><field name="KEY">ArrowUp</field></block>
     </category>
-
-    <category name="動き" colour="#3b82f6">
-      <block type="move_forward">
-        <field name="AMOUNT">1</field>
-      </block>
-      <block type="turn_y">
-        <field name="DEG">15</field>
-      </block>
-      <block type="go_to">
-        <field name="X">0</field>
-        <field name="Y">1</field>
-        <field name="Z">0</field>
-      </block>
-      <block type="jump">
-        <field name="POWER">0.18</field>
-      </block>
+    <category name="動き" colour="210">
+      <block type="move_forward"><field name="AMOUNT">1</field></block>
+      <block type="turn_y"><field name="DEG">15</field></block>
+      <block type="go_to"><field name="X">0</field><field name="Y">1</field><field name="Z">0</field></block>
+      <block type="jump"><field name="POWER">0.18</field></block>
     </category>
-
-    <category name="見た目" colour="#8b5cf6">
-      <block type="set_color">
-        <field name="COLOR">#ff6b6b</field>
-      </block>
-      <block type="set_scale">
-        <field name="SCALE">1.2</field>
-      </block>
+    <category name="見た目" colour="270">
+      <block type="set_color"><field name="COLOR">#ff6b6b</field></block>
+      <block type="set_scale"><field name="SCALE">1.2</field></block>
     </category>
   </xml>
 
