@@ -3,10 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Scratch風 3Dゲームメーカー</title>
+  <title>Scratch風 3Dゲームメーカー Blockly版</title>
   <link rel="stylesheet" href="style.css" />
 
-  <!-- ここが重要：Three.js の読み込みを安定させる importmap -->
   <script type="importmap">
   {
     "imports": {
@@ -15,10 +14,14 @@
     }
   }
   </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/blockly@10.4.3/blockly_compressed.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/blockly@10.4.3/blocks_compressed.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/blockly@10.4.3/msg/ja.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🧊 Scratch風 3Dゲームメーカー</div>
+    <div class="brand">🧊 Scratch風 3Dゲームメーカー <span>Blockly版</span></div>
     <div class="topActions">
       <button id="runBtn" class="primary">▶ 実行</button>
       <button id="stopBtn">■ 停止</button>
@@ -29,64 +32,35 @@
   </header>
 
   <main class="app">
-    <section class="leftPanel">
-      <div class="panelTitle">ブロック</div>
-
-      <div class="category">イベント</div>
-      <button class="block event" draggable="true" data-type="whenStart">▶ はじまったとき</button>
-      <button class="block event" draggable="true" data-type="forever">ずっと</button>
-
-      <div class="category">動き</div>
-      <button class="block motion" draggable="true" data-type="moveForward">前に 1 動く</button>
-      <button class="block motion" draggable="true" data-type="turnY">Y回転 15 度</button>
-      <button class="block motion" draggable="true" data-type="goTo">座標 x:0 y:1 z:0</button>
-      <button class="block motion" draggable="true" data-type="jump">ジャンプ</button>
-
-      <div class="category">見た目</div>
-      <button class="block looks" draggable="true" data-type="setColor">色を変える</button>
-      <button class="block looks" draggable="true" data-type="scale">大きさを 1.2 倍</button>
-
-      <div class="category">制御</div>
-      <button class="block control" draggable="true" data-type="wait">1 秒待つ</button>
-      <button class="block control" draggable="true" data-type="ifKey">もしキー ArrowUp が押されたら</button>
-
-      <div class="hint">
-        ブロックはクリックでも追加できます。<br>
-        ドラッグしてコード欄に入れても追加できます。
-      </div>
-    </section>
-
     <section class="centerPanel">
       <div class="stageHeader">
         <div>
           <strong>3Dステージ</strong>
           <span id="status">停止中</span>
         </div>
-        <div class="cameraBtns">
+        <div class="stageTools">
+          <button id="modeMoveBtn" class="tool active">移動</button>
+          <button id="modeRotateBtn" class="tool">向き変更</button>
+          <button id="modeScaleBtn" class="tool">スケール</button>
           <button id="camResetBtn">カメラリセット</button>
         </div>
       </div>
 
       <div id="stageWrap">
         <canvas id="stage"></canvas>
-      </div>
-
-      <div class="scriptArea">
-        <div class="scriptHeader">
-          <strong>コード</strong>
-          <span id="selectedSpriteName">未選択</span>
+        <div class="stageHint">
+          選択中：<span id="selectedSpriteName">未選択</span>
         </div>
-        <div id="scriptList" class="scriptList"></div>
       </div>
     </section>
 
     <section class="rightPanel">
-      <div class="panelTitle">スプライト</div>
-      <div id="spriteList" class="spriteList"></div>
+      <div class="panelTitleRow">
+        <div class="panelTitle">スプライト</div>
+        <button id="openAddSpriteBtn" class="plusBtn">＋</button>
+      </div>
 
-      <button id="addCubeBtn">＋ Cube追加</button>
-      <button id="addSphereBtn">＋ Sphere追加</button>
-      <button id="addCapsuleBtn">＋ Capsule追加</button>
+      <div id="spriteList" class="spriteList"></div>
 
       <div class="panelTitle small">プロパティ</div>
       <div class="propGrid">
@@ -99,13 +73,88 @@
 
       <button id="deleteSpriteBtn" class="danger full">選択スプライト削除</button>
 
-      <div class="panelTitle small">操作</div>
+      <div class="panelTitle small">説明</div>
       <p class="note">
-        実行中：矢印キーで動かせます。<br>
-        マウスドラッグでカメラ回転、ホイールでズーム。
+        ・カメラは最初からあります。<br>
+        ・実行中は「カメラ」スプライトの位置と向きが画面に反映されます。<br>
+        ・カメラの白い線が向いている方向です。<br>
+        ・ステージ上の選択スプライトは、移動/向き/スケールで直接編集できます。
       </p>
     </section>
+
+    <section class="blocklyPanel">
+      <div class="scriptHeader">
+        <strong>ブロックコード</strong>
+        <span id="blocklyTargetName">未選択</span>
+      </div>
+      <div id="blocklyDiv"></div>
+    </section>
   </main>
+
+  <div id="spriteModal" class="modal hidden">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <strong>追加するスプライトを選ぶ</strong>
+        <button id="closeModalBtn">×</button>
+      </div>
+
+      <div class="spriteChoices">
+        <button class="choice" data-kind="box">▭<span>直方体</span></button>
+        <button class="choice" data-kind="sphere">●<span>球</span></button>
+        <button class="choice" data-kind="cylinder">⬤<span>円柱</span></button>
+        <button class="choice" data-kind="capsule">⬮<span>Capsule</span></button>
+        <button class="choice" data-kind="cone">▲<span>円すい</span></button>
+      </div>
+    </div>
+  </div>
+
+  <xml id="toolbox" style="display:none">
+    <category name="イベント" colour="#f59e0b">
+      <block type="event_start"></block>
+      <block type="event_forever"></block>
+    </category>
+
+    <category name="制御" colour="#ec4899">
+      <block type="controls_if"></block>
+      <block type="logic_compare"></block>
+      <block type="logic_boolean"></block>
+      <block type="wait_seconds">
+        <field name="SEC">1</field>
+      </block>
+    </category>
+
+    <category name="入力" colour="#14b8a6">
+      <block type="key_pressed">
+        <field name="KEY">ArrowUp</field>
+      </block>
+    </category>
+
+    <category name="動き" colour="#3b82f6">
+      <block type="move_forward">
+        <field name="AMOUNT">1</field>
+      </block>
+      <block type="turn_y">
+        <field name="DEG">15</field>
+      </block>
+      <block type="go_to">
+        <field name="X">0</field>
+        <field name="Y">1</field>
+        <field name="Z">0</field>
+      </block>
+      <block type="jump">
+        <field name="POWER">0.18</field>
+      </block>
+    </category>
+
+    <category name="見た目" colour="#8b5cf6">
+      <block type="set_color">
+        <field name="COLOR">#ff6b6b</field>
+      </block>
+      <block type="set_scale">
+        <field name="SCALE">1.2</field>
+      </block>
+    </category>
+  </xml>
 
   <script type="module" src="script.js"></script>
 </body>
