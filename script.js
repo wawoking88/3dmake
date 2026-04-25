@@ -1,5 +1,11 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-import { OrbitControls } from "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+window.addEventListener("error", (e) => {
+  console.error("JSエラー:", e.message, e.error);
+  const status = document.getElementById("status");
+  if (status) status.textContent = "エラー: Consoleを確認";
+});
 
 const canvas = document.getElementById("stage");
 const stageWrap = document.getElementById("stageWrap");
@@ -15,26 +21,10 @@ const propZ = document.getElementById("propZ");
 const propColor = document.getElementById("propColor");
 
 const BLOCKS = {
-  whenStart: {
-    label: "▶ はじまったとき",
-    className: "event",
-    inputs: []
-  },
-  forever: {
-    label: "ずっと",
-    className: "event",
-    inputs: []
-  },
-  moveForward: {
-    label: "前に動く",
-    className: "motion",
-    inputs: [{ name: "amount", type: "number", value: 1 }]
-  },
-  turnY: {
-    label: "Y回転",
-    className: "motion",
-    inputs: [{ name: "deg", type: "number", value: 15 }]
-  },
+  whenStart: { label: "▶ はじまったとき", className: "event", inputs: [] },
+  forever: { label: "ずっと", className: "event", inputs: [] },
+  moveForward: { label: "前に動く", className: "motion", inputs: [{ name: "amount", type: "number", value: 1 }] },
+  turnY: { label: "Y回転", className: "motion", inputs: [{ name: "deg", type: "number", value: 15 }] },
   goTo: {
     label: "座標へ行く",
     className: "motion",
@@ -44,31 +34,11 @@ const BLOCKS = {
       { name: "z", type: "number", value: 0 }
     ]
   },
-  jump: {
-    label: "ジャンプ",
-    className: "motion",
-    inputs: [{ name: "power", type: "number", value: 0.18 }]
-  },
-  setColor: {
-    label: "色を変える",
-    className: "looks",
-    inputs: [{ name: "color", type: "color", value: "#ff6b6b" }]
-  },
-  scale: {
-    label: "大きさを変える",
-    className: "looks",
-    inputs: [{ name: "scale", type: "number", value: 1.2 }]
-  },
-  wait: {
-    label: "待つ",
-    className: "control",
-    inputs: [{ name: "sec", type: "number", value: 1 }]
-  },
-  ifKey: {
-    label: "もしキーが押されたら",
-    className: "control",
-    inputs: [{ name: "key", type: "text", value: "ArrowUp" }]
-  }
+  jump: { label: "ジャンプ", className: "motion", inputs: [{ name: "power", type: "number", value: 0.18 }] },
+  setColor: { label: "色を変える", className: "looks", inputs: [{ name: "color", type: "color", value: "#ff6b6b" }] },
+  scale: { label: "大きさを変える", className: "looks", inputs: [{ name: "scale", type: "number", value: 1.2 }] },
+  wait: { label: "待つ", className: "control", inputs: [{ name: "sec", type: "number", value: 1 }] },
+  ifKey: { label: "もしキーが押されたら", className: "control", inputs: [{ name: "key", type: "text", value: "ArrowUp" }] }
 };
 
 let sprites = [];
@@ -77,10 +47,12 @@ let running = false;
 let lastTime = 0;
 const pressedKeys = new Set();
 
-const renderer = new THREE.WebGLRenderer({
-  canvas,
-  antialias: true
-});
+function uid() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "id_" + Math.random().toString(36).slice(2);
+}
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 
 const scene = new THREE.Scene();
@@ -93,15 +65,13 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1, 0);
 controls.enableDamping = true;
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0x335577, 1.5);
-scene.add(hemi);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x335577, 1.6));
 
-const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+const dir = new THREE.DirectionalLight(0xffffff, 1.1);
 dir.position.set(5, 8, 4);
 scene.add(dir);
 
-const grid = new THREE.GridHelper(30, 30, 0x64748b, 0x94a3b8);
-scene.add(grid);
+scene.add(new THREE.GridHelper(30, 30, 0x64748b, 0x94a3b8));
 
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(30, 30),
@@ -117,13 +87,32 @@ function createGeometry(kind) {
   return new THREE.BoxGeometry(1.2, 1.2, 1.2);
 }
 
+function makeBlock(type) {
+  const def = BLOCKS[type];
+  const values = {};
+  for (const input of def.inputs) values[input.name] = input.value;
+  return { id: uid(), type, values };
+}
+
+function addBlockToSelected(type) {
+  const sprite = getSelectedSprite();
+  if (!sprite) {
+    alert("先にスプライトを選んでください。");
+    return;
+  }
+  if (!BLOCKS[type]) return;
+
+  sprite.blocks.push(makeBlock(type));
+  renderScriptList();
+}
+
 function addSprite(kind = "cube") {
-  const id = crypto.randomUUID();
+  const id = uid();
   const color = kind === "sphere" ? "#f97316" : kind === "capsule" ? "#22c55e" : "#3b82f6";
+
   const material = new THREE.MeshStandardMaterial({ color });
   const mesh = new THREE.Mesh(createGeometry(kind), material);
-  mesh.position.set(sprites.length * 1.6, 0.7, 0);
-  mesh.castShadow = true;
+  mesh.position.set((sprites.length % 5) * 1.6, 0.7, Math.floor(sprites.length / 5) * 1.6);
   mesh.userData.spriteId = id;
   scene.add(mesh);
 
@@ -133,28 +122,19 @@ function addSprite(kind = "cube") {
     kind,
     color,
     mesh,
-    baseScale: 1,
     velocityY: 0,
+    waitTimer: 0,
     blocks: [
       makeBlock("whenStart"),
       makeBlock("forever"),
       makeBlock("ifKey"),
-      makeBlock("moveForward"),
-      makeBlock("turnY")
-    ],
-    waitTimer: 0
+      makeBlock("moveForward")
+    ]
   };
 
   sprites.push(sprite);
-  selectSprite(id);
+  selectedSpriteId = id;
   renderAllPanels();
-}
-
-function makeBlock(type) {
-  const def = BLOCKS[type];
-  const values = {};
-  for (const input of def.inputs) values[input.name] = input.value;
-  return { id: crypto.randomUUID(), type, values };
 }
 
 function selectSprite(id) {
@@ -174,6 +154,7 @@ function renderAllPanels() {
 
 function renderSpriteList() {
   spriteListEl.innerHTML = "";
+
   for (const sprite of sprites) {
     const item = document.createElement("div");
     item.className = "spriteItem" + (sprite.id === selectedSpriteId ? " active" : "");
@@ -197,19 +178,25 @@ function renderScriptList() {
 
   if (!sprite) {
     selectedSpriteNameEl.textContent = "未選択";
+    scriptList.innerHTML = '<div class="emptyScript">スプライトを追加してください</div>';
     return;
   }
 
   selectedSpriteNameEl.textContent = sprite.name;
 
+  if (sprite.blocks.length === 0) {
+    scriptList.innerHTML = '<div class="emptyScript">左のブロックをクリック、またはドラッグしてください</div>';
+    return;
+  }
+
   for (const block of sprite.blocks) {
     const def = BLOCKS[block.type];
+    if (!def) continue;
 
     const el = document.createElement("div");
     el.className = `scriptBlock ${def.className}`;
 
     const label = document.createElement("span");
-    label.className = "label";
     label.textContent = def.label;
 
     const inputs = document.createElement("div");
@@ -219,9 +206,13 @@ function renderScriptList() {
       const input = document.createElement("input");
       input.type = inputDef.type;
       input.value = block.values[inputDef.name];
-      input.oninput = () => {
-        block.values[inputDef.name] = inputDef.type === "number" ? Number(input.value) : input.value;
-      };
+
+      input.addEventListener("input", () => {
+        block.values[inputDef.name] = inputDef.type === "number"
+          ? Number(input.value)
+          : input.value;
+      });
+
       inputs.append(input);
     }
 
@@ -240,7 +231,13 @@ function renderScriptList() {
 
 function renderProps() {
   const sprite = getSelectedSprite();
-  if (!sprite) return;
+  if (!sprite) {
+    propName.value = "";
+    propX.value = "";
+    propY.value = "";
+    propZ.value = "";
+    return;
+  }
 
   propName.value = sprite.name;
   propX.value = sprite.mesh.position.x.toFixed(1);
@@ -254,24 +251,26 @@ function applyProps() {
   if (!sprite) return;
 
   sprite.name = propName.value || "Sprite";
-  sprite.mesh.position.set(Number(propX.value), Number(propY.value), Number(propZ.value));
-  sprite.color = propColor.value;
+  sprite.mesh.position.set(
+    Number(propX.value) || 0,
+    Number(propY.value) || 0,
+    Number(propZ.value) || 0
+  );
+
+  sprite.color = propColor.value || "#3b82f6";
   sprite.mesh.material.color.set(sprite.color);
+
   renderSpriteList();
   selectedSpriteNameEl.textContent = sprite.name;
-}
-
-function resetWorldFromProps() {
-  for (const sprite of sprites) {
-    sprite.velocityY = 0;
-    sprite.waitTimer = 0;
-  }
 }
 
 function runProject() {
   running = true;
   statusEl.textContent = "実行中";
-  resetWorldFromProps();
+  for (const sprite of sprites) {
+    sprite.velocityY = 0;
+    sprite.waitTimer = 0;
+  }
 }
 
 function stopProject() {
@@ -282,11 +281,11 @@ function stopProject() {
 function executeSprite(sprite, dt) {
   const blocks = sprite.blocks;
   const hasStart = blocks.some(b => b.type === "whenStart");
-  const foreverIndex = blocks.findIndex(b => b.type === "forever");
-
   if (!hasStart) return;
 
-  const startIndex = foreverIndex >= 0 ? foreverIndex + 1 : 1;
+  let startIndex = 0;
+  const foreverIndex = blocks.findIndex(b => b.type === "forever");
+  if (foreverIndex >= 0) startIndex = foreverIndex + 1;
 
   for (let i = startIndex; i < blocks.length; i++) {
     const block = blocks[i];
@@ -295,6 +294,8 @@ function executeSprite(sprite, dt) {
       sprite.waitTimer -= dt;
       return;
     }
+
+    if (block.type === "whenStart" || block.type === "forever") continue;
 
     if (block.type === "ifKey") {
       const key = block.values.key || "ArrowUp";
@@ -311,9 +312,9 @@ function runBlock(sprite, block, dt) {
 
   if (block.type === "moveForward") {
     const amount = Number(block.values.amount) || 0;
-    const dir = new THREE.Vector3(0, 0, -1);
-    dir.applyEuler(mesh.rotation);
-    mesh.position.addScaledVector(dir, amount * dt * 3);
+    const forward = new THREE.Vector3(0, 0, -1);
+    forward.applyEuler(mesh.rotation);
+    mesh.position.addScaledVector(forward, amount * dt * 3);
   }
 
   if (block.type === "turnY") {
@@ -363,8 +364,9 @@ function updatePhysics(sprite) {
 
 function resizeRenderer() {
   const rect = stageWrap.getBoundingClientRect();
-  const width = Math.max(1, rect.width);
-  const height = Math.max(1, rect.height);
+  const width = Math.max(1, Math.floor(rect.width));
+  const height = Math.max(1, Math.floor(rect.height));
+
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
@@ -372,6 +374,7 @@ function resizeRenderer() {
 
 function animate(time) {
   requestAnimationFrame(animate);
+
   resizeRenderer();
 
   const dt = Math.min(0.05, (time - lastTime) / 1000 || 0);
@@ -420,21 +423,21 @@ function loadProject() {
   for (const saved of data.sprites) {
     const material = new THREE.MeshStandardMaterial({ color: saved.color });
     const mesh = new THREE.Mesh(createGeometry(saved.kind), material);
-    mesh.position.fromArray(saved.position);
-    mesh.rotation.set(saved.rotation[0], saved.rotation[1], saved.rotation[2]);
+
+    mesh.position.fromArray(saved.position || [0, 0.7, 0]);
+    if (saved.rotation) mesh.rotation.set(saved.rotation[0], saved.rotation[1], saved.rotation[2]);
     mesh.scale.setScalar(saved.scale || 1);
     scene.add(mesh);
 
     sprites.push({
-      id: saved.id || crypto.randomUUID(),
-      name: saved.name,
-      kind: saved.kind,
-      color: saved.color,
+      id: saved.id || uid(),
+      name: saved.name || "Sprite",
+      kind: saved.kind || "cube",
+      color: saved.color || "#3b82f6",
       mesh,
-      baseScale: saved.scale || 1,
       velocityY: 0,
-      blocks: saved.blocks || [],
-      waitTimer: 0
+      waitTimer: 0,
+      blocks: saved.blocks || []
     });
   }
 
@@ -448,6 +451,7 @@ function clearSpritesOnly() {
     sprite.mesh.geometry.dispose();
     sprite.mesh.material.dispose();
   }
+
   sprites = [];
   selectedSpriteId = null;
 }
@@ -456,18 +460,34 @@ function clearProject() {
   if (!confirm("全部消しますか？")) return;
   clearSpritesOnly();
   addSprite("cube");
-  renderAllPanels();
 }
 
 document.querySelectorAll(".block").forEach(btn => {
   btn.addEventListener("click", () => {
-    const sprite = getSelectedSprite();
-    if (!sprite) return alert("スプライトを選んでください。");
-
-    const type = btn.dataset.type;
-    sprite.blocks.push(makeBlock(type));
-    renderScriptList();
+    addBlockToSelected(btn.dataset.type);
   });
+
+  btn.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", btn.dataset.type);
+    e.dataTransfer.effectAllowed = "copy";
+  });
+});
+
+scriptList.addEventListener("dragover", e => {
+  e.preventDefault();
+  scriptList.classList.add("dragOver");
+});
+
+scriptList.addEventListener("dragleave", () => {
+  scriptList.classList.remove("dragOver");
+});
+
+scriptList.addEventListener("drop", e => {
+  e.preventDefault();
+  scriptList.classList.remove("dragOver");
+
+  const type = e.dataTransfer.getData("text/plain");
+  addBlockToSelected(type);
 });
 
 document.getElementById("runBtn").onclick = runProject;
@@ -504,6 +524,7 @@ document.getElementById("camResetBtn").onclick = () => {
 
 window.addEventListener("keydown", e => {
   pressedKeys.add(e.key);
+
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
     e.preventDefault();
   }

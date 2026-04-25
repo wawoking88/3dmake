@@ -29,7 +29,6 @@ button, input {
 
 .brand {
   font-weight: 800;
-  letter-spacing: .02em;
 }
 
 .topActions {
@@ -74,7 +73,7 @@ button.danger {
 .centerPanel,
 .rightPanel {
   min-height: 0;
-  background: rgba(255,255,255,.9);
+  background: rgba(255,255,255,.95);
   border-radius: 16px;
   box-shadow: 0 8px 22px rgba(15, 23, 42, .12);
   overflow: hidden;
@@ -117,10 +116,8 @@ button.danger {
   box-shadow: inset 0 -2px 0 rgba(0,0,0,.18), 0 2px 5px rgba(0,0,0,.12);
 }
 
-.block span {
-  background: rgba(255,255,255,.25);
-  padding: 2px 7px;
-  border-radius: 999px;
+.block:active {
+  transform: scale(.98);
 }
 
 .event { background: #f59e0b; }
@@ -177,6 +174,19 @@ button.danger {
   padding: 10px;
   overflow-y: auto;
   background: #f8fafc;
+  border: 3px dashed transparent;
+}
+
+.scriptList.dragOver {
+  border-color: #2563eb;
+  background: #dbeafe;
+}
+
+.emptyScript {
+  color: #64748b;
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
 }
 
 .scriptBlock {
@@ -189,7 +199,6 @@ button.danger {
   border-radius: 14px;
   color: white;
   font-weight: 700;
-  background: #3b82f6;
   box-shadow: inset 0 -2px 0 rgba(0,0,0,.18), 0 2px 5px rgba(0,0,0,.12);
 }
 
@@ -205,7 +214,8 @@ button.danger {
   margin-left: auto;
 }
 
-.inputs input, .propGrid input {
+.inputs input,
+.propGrid input {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 5px;
@@ -252,7 +262,6 @@ button.danger {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: #60a5fa;
   box-shadow: inset 0 -3px 0 rgba(0,0,0,.18);
 }
 

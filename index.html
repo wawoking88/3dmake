@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Scratch風 3Dゲームメーカー</title>
   <link rel="stylesheet" href="style.css" />
+
+  <!-- ここが重要：Three.js の読み込みを安定させる importmap -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -23,25 +33,26 @@
       <div class="panelTitle">ブロック</div>
 
       <div class="category">イベント</div>
-      <button class="block event" data-type="whenStart">▶ はじまったとき</button>
-      <button class="block event" data-type="forever">ずっと</button>
+      <button class="block event" draggable="true" data-type="whenStart">▶ はじまったとき</button>
+      <button class="block event" draggable="true" data-type="forever">ずっと</button>
 
       <div class="category">動き</div>
-      <button class="block motion" data-type="moveForward">前に <span>1</span> 動く</button>
-      <button class="block motion" data-type="turnY">Y回転 <span>15</span> 度</button>
-      <button class="block motion" data-type="goTo">座標 x:<span>0</span> y:<span>1</span> z:<span>0</span></button>
-      <button class="block motion" data-type="jump">ジャンプ</button>
+      <button class="block motion" draggable="true" data-type="moveForward">前に 1 動く</button>
+      <button class="block motion" draggable="true" data-type="turnY">Y回転 15 度</button>
+      <button class="block motion" draggable="true" data-type="goTo">座標 x:0 y:1 z:0</button>
+      <button class="block motion" draggable="true" data-type="jump">ジャンプ</button>
 
       <div class="category">見た目</div>
-      <button class="block looks" data-type="setColor">色を変える</button>
-      <button class="block looks" data-type="scale">大きさを <span>1.2</span> 倍</button>
+      <button class="block looks" draggable="true" data-type="setColor">色を変える</button>
+      <button class="block looks" draggable="true" data-type="scale">大きさを 1.2 倍</button>
 
       <div class="category">制御</div>
-      <button class="block control" data-type="wait"> <span>1</span> 秒待つ</button>
-      <button class="block control" data-type="ifKey">もしキー <span>ArrowUp</span> が押されたら</button>
+      <button class="block control" draggable="true" data-type="wait">1 秒待つ</button>
+      <button class="block control" draggable="true" data-type="ifKey">もしキー ArrowUp が押されたら</button>
 
       <div class="hint">
-        ブロックを押すと、選択中スプライトのコードに追加されます。
+        ブロックはクリックでも追加できます。<br>
+        ドラッグしてコード欄に入れても追加できます。
       </div>
     </section>
 
@@ -55,6 +66,7 @@
           <button id="camResetBtn">カメラリセット</button>
         </div>
       </div>
+
       <div id="stageWrap">
         <canvas id="stage"></canvas>
       </div>
@@ -62,7 +74,7 @@
       <div class="scriptArea">
         <div class="scriptHeader">
           <strong>コード</strong>
-          <span id="selectedSpriteName">Cube</span>
+          <span id="selectedSpriteName">未選択</span>
         </div>
         <div id="scriptList" class="scriptList"></div>
       </div>
@@ -84,6 +96,7 @@
         <label>Z<input id="propZ" type="number" step="0.1" /></label>
         <label>色<input id="propColor" type="color" /></label>
       </div>
+
       <button id="deleteSpriteBtn" class="danger full">選択スプライト削除</button>
 
       <div class="panelTitle small">操作</div>
@@ -93,14 +106,6 @@
       </p>
     </section>
   </main>
-
-  <template id="scriptBlockTemplate">
-    <div class="scriptBlock">
-      <span class="label"></span>
-      <div class="inputs"></div>
-      <button class="mini remove">×</button>
-    </div>
-  </template>
 
   <script type="module" src="script.js"></script>
 </body>
