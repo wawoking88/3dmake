@@ -89,6 +89,7 @@ floor.position.y = -0.01;
 scene.add(floor);
 
 const raycaster = new THREE.Raycaster();
+raycaster.params.Line.threshold = 0.18;
 const pointer = new THREE.Vector2();
 
 const gizmo = new THREE.Group();
@@ -283,26 +284,157 @@ function setObjectColor(s){
   });
 }
 
-function makeGizmoLine(name, color, end){
-  const mat = new THREE.LineBasicMaterial({color});
-  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), end]);
-  const line = new THREE.Line(geo, mat);
-  line.layers.set(EDITOR_LAYER);
-  line.name = name;
-  return line;
+function setEditorLayerDeep(object){
+  object.layers.set(EDITOR_LAYER);
+  object.traverse(child => child.layers.set(EDITOR_LAYER));
 }
-const xLine = makeGizmoLine("x",0xff3333,new THREE.Vector3(1.8,0,0));
-const yLine = makeGizmoLine("y",0x33cc33,new THREE.Vector3(0,1.8,0));
-const zLine = makeGizmoLine("z",0x3366ff,new THREE.Vector3(0,0,1.8));
-gizmo.add(xLine,yLine,zLine);
+
+function makeArrowAxis(name, color){
+  const group = new THREE.Group();
+  group.name = name;
+  group.userData.axis = name;
+
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    depthTest: false,
+    depthWrite: false
+  });
+
+  const line = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.35, 12), mat);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.34, 18), mat);
+
+  if(name === "x"){
+    line.rotation.z = -Math.PI / 2;
+    line.position.x = 0.68;
+    head.rotation.z = -Math.PI / 2;
+    head.position.x = 1.5;
+  } else if(name === "y"){
+    line.position.y = 0.68;
+    head.position.y = 1.5;
+  } else if(name === "z"){
+    line.rotation.x = Math.PI / 2;
+    line.position.z = 0.68;
+    head.rotation.x = Math.PI / 2;
+    head.position.z = 1.5;
+  }
+
+  line.userData.axis = name;
+  head.userData.axis = name;
+  group.add(line, head);
+  setEditorLayerDeep(group);
+  return group;
+}
+
+function makeScaleAxis(name, color){
+  const group = new THREE.Group();
+  group.name = name;
+  group.userData.axis = name;
+
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    depthTest: false,
+    depthWrite: false
+  });
+
+  const line = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.25, 12), mat);
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), mat);
+
+  if(name === "x"){
+    line.rotation.z = -Math.PI / 2;
+    line.position.x = 0.62;
+    box.position.x = 1.35;
+  } else if(name === "y"){
+    line.position.y = 0.62;
+    box.position.y = 1.35;
+  } else if(name === "z"){
+    line.rotation.x = Math.PI / 2;
+    line.position.z = 0.62;
+    box.position.z = 1.35;
+  }
+
+  line.userData.axis = name;
+  box.userData.axis = name;
+  group.add(line, box);
+  setEditorLayerDeep(group);
+  return group;
+}
+
+function makeCirclePoints(radius, axis){
+  const pts = [];
+  const steps = 96;
+
+  for(let i = 0; i <= steps; i++){
+    const a = (i / steps) * Math.PI * 2;
+
+    if(axis === "x"){
+      pts.push(new THREE.Vector3(0, Math.cos(a) * radius, Math.sin(a) * radius));
+    } else if(axis === "y"){
+      pts.push(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
+    } else {
+      pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+    }
+  }
+
+  return pts;
+}
+
+function makeRotateRing(name, color){
+  const geo = new THREE.BufferGeometry().setFromPoints(makeCirclePoints(1.45, name));
+  const mat = new THREE.LineBasicMaterial({
+    color,
+    depthTest: false,
+    depthWrite: false
+  });
+
+  const ring = new THREE.Line(geo, mat);
+  ring.name = name;
+  ring.userData.axis = name;
+  ring.layers.set(EDITOR_LAYER);
+  return ring;
+}
+
+const moveGizmo = new THREE.Group();
+moveGizmo.name = "moveGizmo";
+moveGizmo.add(
+  makeArrowAxis("x", 0xff3333),
+  makeArrowAxis("y", 0x33cc33),
+  makeArrowAxis("z", 0x3366ff)
+);
+
+const scaleGizmo = new THREE.Group();
+scaleGizmo.name = "scaleGizmo";
+scaleGizmo.add(
+  makeScaleAxis("x", 0xff3333),
+  makeScaleAxis("y", 0x33cc33),
+  makeScaleAxis("z", 0x3366ff)
+);
+
+const rotateGizmo = new THREE.Group();
+rotateGizmo.name = "rotateGizmo";
+rotateGizmo.add(
+  makeRotateRing("x", 0xff3333),
+  makeRotateRing("y", 0x33cc33),
+  makeRotateRing("z", 0x3366ff)
+);
+
+gizmo.add(moveGizmo, scaleGizmo, rotateGizmo);
+setEditorLayerDeep(gizmo);
 function updateGizmo(){
   const s = getSelectedSprite();
   gizmo.visible = !!s && !running;
   if(!s) return;
+
   gizmo.position.copy(s.object.position);
   gizmo.rotation.set(0,0,0);
-  const scale = editMode==="scale" ? 1.3 : 1;
-  gizmo.scale.setScalar(scale);
+
+  // スプライト自体のスケールに引っ張られないように、操作ガイドは一定サイズで表示
+  const distance = previewCamera.position.distanceTo(s.object.position);
+  const guideScale = Math.max(0.75, Math.min(2.2, distance * 0.12));
+  gizmo.scale.setScalar(guideScale);
+
+  moveGizmo.visible = editMode === "translate";
+  rotateGizmo.visible = editMode === "rotate";
+  scaleGizmo.visible = editMode === "scale";
 }
 
 let draggingAxis = null;
@@ -316,13 +448,14 @@ stageWrap.addEventListener("pointerdown", e=>{
   pointer.y = -((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer, previewCamera);
 
-  // 先に編集用レイヤーの操作ガイドを判定
+  // 先に編集用レイヤーの操作ガイドを判定。矢印・四角・リングの子パーツまで拾う。
   raycaster.layers.set(EDITOR_LAYER);
-  const gizHits = raycaster.intersectObjects(gizmo.children, false);
+  const gizHits = raycaster.intersectObject(gizmo, true);
   raycaster.layers.set(GAME_LAYER);
 
   if(gizHits.length){
-    draggingAxis = gizHits[0].object.name;
+    const hitObj = gizHits[0].object;
+    draggingAxis = hitObj.userData.axis || hitObj.name || hitObj.parent?.userData?.axis || hitObj.parent?.name;
     dragStart = {x:e.clientX,y:e.clientY};
     objectStart = getSelectedSprite().object.clone();
     controls.enabled = false;
