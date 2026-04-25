@@ -31,6 +31,7 @@ const modal = document.getElementById("spriteModal");
 let sprites = [];
 let selectedSpriteId = null;
 let running = false;
+let runSnapshot = null;
 let lastTime = 0;
 let editMode = "translate";
 let workspace = null;
@@ -49,10 +50,19 @@ renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdbeafe);
 
+// レイヤー設定
+// 0: ゲーム本体
+// 1: 編集中だけ見せるカメラ見た目・操作ガイド
+const GAME_LAYER = 0;
+const EDITOR_LAYER = 1;
+
 const previewCamera = new THREE.PerspectiveCamera(60,1,0.1,1000);
 previewCamera.position.set(7,5,8);
+previewCamera.layers.enable(GAME_LAYER);
+previewCamera.layers.enable(EDITOR_LAYER);
 
 const gameCamera = new THREE.PerspectiveCamera(65,1,0.1,1000);
+gameCamera.layers.set(GAME_LAYER);
 
 const controls = new OrbitControls(previewCamera, renderer.domElement);
 controls.target.set(0,1,0);
@@ -76,6 +86,7 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
 const gizmo = new THREE.Group();
+gizmo.layers.set(EDITOR_LAYER);
 scene.add(gizmo);
 
 function createGeometry(kind){
@@ -89,11 +100,14 @@ function createGeometry(kind){
 
 function makeCameraVisual(){
   const group = new THREE.Group();
+  group.layers.set(EDITOR_LAYER);
   const body = new THREE.Mesh(new THREE.BoxGeometry(.9,.55,.55), new THREE.MeshStandardMaterial({color:"#111827",roughness:.65}));
+  body.layers.set(EDITOR_LAYER);
   group.add(body);
-  const lens = new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.32,24), new THREE.MeshStandardMaterial({color:"#60a5fa"}));
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.32,24), new THREE.MeshStandardMaterial({color:"#e5e7eb"}));
   lens.rotation.x = Math.PI/2;
   lens.position.z = -.42;
+  lens.layers.set(EDITOR_LAYER);
   group.add(lens);
   const pts = [
     [0,0,-.65, 0,0,-3.4],
@@ -110,7 +124,13 @@ function makeCameraVisual(){
   for(const p of pts){
     points.push(new THREE.Vector3(p[0],p[1],p[2]), new THREE.Vector3(p[3],p[4],p[5]));
   }
-  group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({color:0xffffff})));
+  const cameraGuide = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({color:0xffffff})
+  );
+  cameraGuide.layers.set(EDITOR_LAYER);
+  group.add(cameraGuide);
+
   return group;
 }
 
@@ -243,6 +263,7 @@ function makeGizmoLine(name, color, end){
   const mat = new THREE.LineBasicMaterial({color});
   const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), end]);
   const line = new THREE.Line(geo, mat);
+  line.layers.set(EDITOR_LAYER);
   line.name = name;
   return line;
 }
@@ -381,13 +402,61 @@ function updatePhysics(s){
   s.object.position.y += s.velocityY;
   if(s.object.position.y<.75){ s.object.position.y=.75; s.velocityY=0; }
 }
+function makeRunSnapshot(){
+  return sprites.map(s => ({
+    id: s.id,
+    position: s.object.position.clone(),
+    rotation: s.object.rotation.clone(),
+    scale: s.object.scale.clone(),
+    color: s.color
+  }));
+}
+
+function restoreRunSnapshot(){
+  if(!runSnapshot) return;
+
+  for(const saved of runSnapshot){
+    const s = sprites.find(x => x.id === saved.id);
+    if(!s) continue;
+
+    s.object.position.copy(saved.position);
+    s.object.rotation.copy(saved.rotation);
+    s.object.scale.copy(saved.scale);
+    s.color = saved.color;
+    setObjectColor(s);
+    s.velocityY = 0;
+    s.waitTimer = 0;
+    s.startDone = false;
+  }
+
+  renderAll();
+}
+
 function runProject(){
   const s = getSelectedSprite();
   if(workspace && s) s.workspaceJson = Blockly.serialization.workspaces.save(workspace);
-  running=true; statusEl.textContent="実行中"; gizmo.visible=false;
-  for(const sp of sprites){ sp.velocityY=0; sp.waitTimer=0; sp.startDone=false; }
+
+  // 実行ボタンを押した瞬間の状態を保存
+  runSnapshot = makeRunSnapshot();
+
+  running=true;
+  statusEl.textContent="実行中";
+  gizmo.visible=false;
+
+  for(const sp of sprites){
+    sp.velocityY=0;
+    sp.waitTimer=0;
+    sp.startDone=false;
+  }
 }
-function stopProject(){ running=false; statusEl.textContent="停止中"; updateGizmo(); }
+function stopProject(){
+  running=false;
+  statusEl.textContent="停止中";
+
+  // 停止したら、実行を押した時の位置・向き・大きさ・色へ戻す
+  restoreRunSnapshot();
+  updateGizmo();
+}
 
 function saveProject(){
   const s = getSelectedSprite();
