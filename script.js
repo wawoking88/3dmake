@@ -104,11 +104,6 @@ function makeCameraVisual(){
   const body = new THREE.Mesh(new THREE.BoxGeometry(.9,.55,.55), new THREE.MeshStandardMaterial({color:"#111827",roughness:.65}));
   body.layers.set(EDITOR_LAYER);
   group.add(body);
-  const lens = new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.32,24), new THREE.MeshStandardMaterial({color:"#e5e7eb"}));
-  lens.rotation.x = Math.PI/2;
-  lens.position.z = -.42;
-  lens.layers.set(EDITOR_LAYER);
-  group.add(lens);
   const pts = [
     [0,0,-.65, 0,0,-3.4],
     [0,0,-.7, -1.1,.7,-3.2],
@@ -403,57 +398,112 @@ function updatePhysics(s){
   if(s.object.position.y<.75){ s.object.position.y=.75; s.velocityY=0; }
 }
 function makeRunSnapshot(){
+  // 実行ボタンを押した瞬間の、カメラを含む全スプライト情報を保存
   return sprites.map(s => ({
     id: s.id,
+    name: s.name,
+    kind: s.kind,
+    color: s.color,
     position: s.object.position.clone(),
     rotation: s.object.rotation.clone(),
+    quaternion: s.object.quaternion.clone(),
     scale: s.object.scale.clone(),
-    color: s.color
+    visible: s.object.visible,
+    velocityY: s.velocityY,
+    waitTimer: s.waitTimer,
+    startDone: s.startDone,
+    workspaceJson: structuredCloneSafe(s.workspaceJson)
   }));
+}
+
+function structuredCloneSafe(value){
+  try {
+    return structuredClone(value);
+  } catch (_) {
+    return JSON.parse(JSON.stringify(value));
+  }
 }
 
 function restoreRunSnapshot(){
   if(!runSnapshot) return;
 
+  // 保存時に存在していたスプライト情報を復元
   for(const saved of runSnapshot){
     const s = sprites.find(x => x.id === saved.id);
     if(!s) continue;
 
+    s.name = saved.name;
+    s.kind = saved.kind;
+    s.color = saved.color;
     s.object.position.copy(saved.position);
     s.object.rotation.copy(saved.rotation);
+    s.object.quaternion.copy(saved.quaternion);
     s.object.scale.copy(saved.scale);
-    s.color = saved.color;
+    s.object.visible = saved.visible;
+    s.velocityY = saved.velocityY || 0;
+    s.waitTimer = saved.waitTimer || 0;
+    s.startDone = saved.startDone || false;
+    s.workspaceJson = structuredCloneSafe(saved.workspaceJson);
+
     setObjectColor(s);
-    s.velocityY = 0;
-    s.waitTimer = 0;
-    s.startDone = false;
+  }
+
+  // 実行中に新しく追加されたスプライトがもしあれば削除
+  const savedIds = new Set(runSnapshot.map(s => s.id));
+  for(const s of [...sprites]){
+    if(savedIds.has(s.id)) continue;
+    scene.remove(s.object);
+    s.object.traverse(c=>{
+      if(c.geometry) c.geometry.dispose();
+      if(c.material) c.material.dispose?.();
+    });
+    sprites = sprites.filter(x => x.id !== s.id);
+  }
+
+  // 選択中スプライトが消えていたら先頭へ
+  if(!sprites.some(s => s.id === selectedSpriteId)){
+    selectedSpriteId = sprites[0]?.id || null;
+  }
+
+  const selected = getSelectedSprite();
+  if(selected && workspace){
+    loadWorkspaceFor(selected);
   }
 
   renderAll();
 }
 
 function runProject(){
-  const s = getSelectedSprite();
-  if(workspace && s) s.workspaceJson = Blockly.serialization.workspaces.save(workspace);
+  // すでに実行中なら、保存し直さない
+  if(running) return;
 
-  // 実行ボタンを押した瞬間の状態を保存
+  const s = getSelectedSprite();
+  if(workspace && s) {
+    s.workspaceJson = Blockly.serialization.workspaces.save(workspace);
+  }
+
+  // 停止中に実行ボタンを押した瞬間だけ、カメラを含む全スプライト情報を保存
   runSnapshot = makeRunSnapshot();
 
-  running=true;
-  statusEl.textContent="実行中";
-  gizmo.visible=false;
+  running = true;
+  statusEl.textContent = "実行中";
+  gizmo.visible = false;
 
+  // 実行用の一時状態だけ初期化。位置・向き・大きさなどは保存済み
   for(const sp of sprites){
-    sp.velocityY=0;
-    sp.waitTimer=0;
-    sp.startDone=false;
+    sp.velocityY = 0;
+    sp.waitTimer = 0;
+    sp.startDone = false;
   }
 }
 function stopProject(){
-  running=false;
-  statusEl.textContent="停止中";
+  // 停止中なら何もしない
+  if(!running) return;
 
-  // 停止したら、実行を押した時の位置・向き・大きさ・色へ戻す
+  running = false;
+  statusEl.textContent = "停止中";
+
+  // 実行中に停止ボタンを押した時だけ、実行開始時に保存した状態を読み込む
   restoreRunSnapshot();
   updateGizmo();
 }
