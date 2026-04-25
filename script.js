@@ -25,8 +25,14 @@ const propName = document.getElementById("propName");
 const propX = document.getElementById("propX");
 const propY = document.getElementById("propY");
 const propZ = document.getElementById("propZ");
+const propRotX = document.getElementById("propRotX");
+const propRotY = document.getElementById("propRotY");
+const propRotZ = document.getElementById("propRotZ");
+const propScale = document.getElementById("propScale");
 const propColor = document.getElementById("propColor");
 const modal = document.getElementById("spriteModal");
+const runBtn = document.getElementById("runBtn");
+const stopBtn = document.getElementById("stopBtn");
 
 let sprites = [];
 let selectedSpriteId = null;
@@ -189,8 +195,9 @@ function addSprite(kind){
   const id = uid();
   const color = colorForKind(kind);
   const object = createObject(kind,color);
-  object.position.set((sprites.length%5)*1.6, kind==="camera"?3:.75, kind==="camera"?8:Math.floor(sprites.length/5)*1.6);
-  if(kind==="camera") object.rotation.x = THREE.MathUtils.degToRad(-15);
+  object.position.set(kind==="camera" ? 0 : (sprites.length%5)*1.6, kind==="camera"?3:.75, kind==="camera"?8:Math.floor(sprites.length/5)*1.6);
+  // Cameraは最初、傾きなし。ワールドのZマイナス方向をまっすぐ見る状態。
+  if(kind==="camera") object.rotation.set(0, 0, 0);
   object.userData.spriteId = id;
   object.traverse(c=>c.userData.spriteId=id);
   scene.add(object);
@@ -229,13 +236,28 @@ function renderSpriteList(){
 }
 function renderProps(){
   const s = getSelectedSprite();
-  if(!s){ selectedSpriteNameEl.textContent="未選択"; return; }
+  if(!s){
+    selectedSpriteNameEl.textContent="未選択";
+    propName.value="";
+    propX.value="";
+    propY.value="";
+    propZ.value="";
+    propRotX.value="";
+    propRotY.value="";
+    propRotZ.value="";
+    propScale.value="";
+    return;
+  }
   selectedSpriteNameEl.textContent = s.name;
   blocklyTargetNameEl.textContent = s.name;
   propName.value=s.name;
   propX.value=s.object.position.x.toFixed(1);
   propY.value=s.object.position.y.toFixed(1);
   propZ.value=s.object.position.z.toFixed(1);
+  propRotX.value=THREE.MathUtils.radToDeg(s.object.rotation.x).toFixed(0);
+  propRotY.value=THREE.MathUtils.radToDeg(s.object.rotation.y).toFixed(0);
+  propRotZ.value=THREE.MathUtils.radToDeg(s.object.rotation.z).toFixed(0);
+  propScale.value=s.object.scale.x.toFixed(1);
   propColor.value=s.color;
 }
 function applyProps(){
@@ -243,6 +265,13 @@ function applyProps(){
   if(!s) return;
   s.name = propName.value || "Sprite";
   s.object.position.set(Number(propX.value)||0,Number(propY.value)||0,Number(propZ.value)||0);
+  s.object.rotation.set(
+    THREE.MathUtils.degToRad(Number(propRotX.value)||0),
+    THREE.MathUtils.degToRad(Number(propRotY.value)||0),
+    THREE.MathUtils.degToRad(Number(propRotZ.value)||0)
+  );
+  const scaleValue = Math.max(0.1, Number(propScale.value)||1);
+  s.object.scale.setScalar(scaleValue);
   s.color = propColor.value || "#3b82f6";
   setObjectColor(s);
   renderSpriteList();
@@ -279,13 +308,19 @@ function updateGizmo(){
 let draggingAxis = null;
 let dragStart = null;
 let objectStart = null;
+let draggingSelectedBody = false;
 stageWrap.addEventListener("pointerdown", e=>{
   if(running) return;
   const rect = stageWrap.getBoundingClientRect();
   pointer.x = ((e.clientX-rect.left)/rect.width)*2-1;
   pointer.y = -((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer, previewCamera);
+
+  // 先に編集用レイヤーの操作ガイドを判定
+  raycaster.layers.set(EDITOR_LAYER);
   const gizHits = raycaster.intersectObjects(gizmo.children, false);
+  raycaster.layers.set(GAME_LAYER);
+
   if(gizHits.length){
     draggingAxis = gizHits[0].object.name;
     dragStart = {x:e.clientX,y:e.clientY};
@@ -299,7 +334,18 @@ stageWrap.addEventListener("pointerdown", e=>{
   const hits = raycaster.intersectObjects(meshes,false);
   if(hits.length){
     const id = hits[0].object.userData.spriteId;
-    if(id) selectSprite(id);
+    if(id) {
+      selectSprite(id);
+
+      // 操作ガイドが掴みにくい時用：
+      // 選択したスプライト本体をドラッグしても編集できるようにする
+      draggingSelectedBody = true;
+      draggingAxis = "body";
+      dragStart = {x:e.clientX,y:e.clientY};
+      objectStart = getSelectedSprite().object.clone();
+      controls.enabled = false;
+      stageWrap.setPointerCapture(e.pointerId);
+    }
   }
 });
 stageWrap.addEventListener("pointermove", e=>{
@@ -311,16 +357,29 @@ stageWrap.addEventListener("pointermove", e=>{
   const amount = draggingAxis === "y" ? -dy : dx;
   if(editMode==="translate"){
     s.object.position.copy(objectStart.position);
-    if(draggingAxis==="x") s.object.position.x += amount;
-    if(draggingAxis==="y") s.object.position.y += amount;
-    if(draggingAxis==="z") s.object.position.z += amount;
+
+    if(draggingAxis==="body"){
+      // 本体ドラッグは、画面横でX、画面縦でZに動かす
+      s.object.position.x += dx;
+      s.object.position.z += dy;
+    } else {
+      if(draggingAxis==="x") s.object.position.x += amount;
+      if(draggingAxis==="y") s.object.position.y += amount;
+      if(draggingAxis==="z") s.object.position.z += amount;
+    }
   } else if(editMode==="rotate"){
     s.object.rotation.copy(objectStart.rotation);
-    if(draggingAxis==="x") s.object.rotation.x += amount;
-    if(draggingAxis==="y") s.object.rotation.y += amount;
-    if(draggingAxis==="z") s.object.rotation.z += amount;
+
+    if(draggingAxis==="body"){
+      s.object.rotation.y += dx;
+      s.object.rotation.x += dy;
+    } else {
+      if(draggingAxis==="x") s.object.rotation.x += amount;
+      if(draggingAxis==="y") s.object.rotation.y += amount;
+      if(draggingAxis==="z") s.object.rotation.z += amount;
+    }
   } else if(editMode==="scale"){
-    const sc = Math.max(.1, objectStart.scale.x + amount);
+    const sc = Math.max(.1, objectStart.scale.x + (draggingAxis==="body" ? -dy : amount));
     s.object.scale.setScalar(sc);
   }
   renderProps();
@@ -328,6 +387,7 @@ stageWrap.addEventListener("pointermove", e=>{
 });
 stageWrap.addEventListener("pointerup", e=>{
   draggingAxis = null;
+  draggingSelectedBody = false;
   controls.enabled = true;
   try{ stageWrap.releasePointerCapture(e.pointerId); }catch(_){}
 });
@@ -473,6 +533,16 @@ function restoreRunSnapshot(){
   renderAll();
 }
 
+function updateRunStopButtons(){
+  if(running){
+    runBtn.style.display = "none";
+    stopBtn.style.display = "";
+  } else {
+    runBtn.style.display = "";
+    stopBtn.style.display = "none";
+  }
+}
+
 function runProject(){
   // すでに実行中なら、保存し直さない
   if(running) return;
@@ -488,6 +558,7 @@ function runProject(){
   running = true;
   statusEl.textContent = "実行中";
   gizmo.visible = false;
+  updateRunStopButtons();
 
   // 実行用の一時状態だけ初期化。位置・向き・大きさなどは保存済み
   for(const sp of sprites){
@@ -502,6 +573,7 @@ function stopProject(){
 
   running = false;
   statusEl.textContent = "停止中";
+  updateRunStopButtons();
 
   // 実行中に停止ボタンを押した時だけ、実行開始時に保存した状態を読み込む
   restoreRunSnapshot();
@@ -591,7 +663,7 @@ document.getElementById("openAddSpriteBtn").onclick=()=>modal.classList.remove("
 document.getElementById("closeModalBtn").onclick=()=>modal.classList.add("hidden");
 modal.addEventListener("click",e=>{ if(e.target===modal) modal.classList.add("hidden"); });
 document.querySelectorAll(".choice").forEach(btn=>btn.onclick=()=>{ addSprite(btn.dataset.kind); modal.classList.add("hidden"); });
-[propName,propX,propY,propZ,propColor].forEach(i=>i.addEventListener("input",applyProps));
+[propName,propX,propY,propZ,propRotX,propRotY,propRotZ,propScale,propColor].forEach(i=>i.addEventListener("input",applyProps));
 
 window.addEventListener("keydown", e=>{ pressedKeys.add(e.key); if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault(); });
 window.addEventListener("keyup", e=>pressedKeys.delete(e.key));
@@ -600,6 +672,7 @@ initBlockly();
 addInitialCamera();
 addSprite("box");
 setMode("translate");
+updateRunStopButtons();
 requestAnimationFrame(animate);
 
 } catch (err) {
