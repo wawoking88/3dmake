@@ -3,19 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Scratch風 3Dゲームメーカー Blockly修正版</title>
+  <title>Scratch風 3Dゲームメーカー Rebuild</title>
   <link rel="stylesheet" href="style.css" />
 
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
     }
   }
   </script>
 
-  <!-- Blocklyは1本読み込みにして安定化 -->
   <script src="https://unpkg.com/blockly/blockly.min.js"></script>
   <script src="https://unpkg.com/blockly/msg/ja.js"></script>
 </head>
@@ -23,18 +21,18 @@
   <div id="errorBox" class="errorBox hidden"></div>
 
   <header class="topbar">
-    <div class="brand">🧊 Scratch風 3Dゲームメーカー <span>Blockly修正版</span></div>
+    <div class="brand">🧊 Scratch風 3Dゲームメーカー <span>完全作り直し版</span></div>
     <div class="topActions">
       <button id="runBtn" class="primary">▶ 実行</button>
-      <button id="stopBtn">■ 停止</button>
+      <button id="stopBtn" class="danger">■ 停止</button>
       <button id="saveBtn">保存</button>
       <button id="loadBtn">読込</button>
-      <button id="clearBtn" class="danger">全消去</button>
+      <button id="clearBtn">全消去</button>
     </div>
   </header>
 
   <main class="app">
-    <section class="centerPanel">
+    <section class="stagePanel">
       <div class="stageHeader">
         <div>
           <strong>3Dステージ</strong>
@@ -42,16 +40,44 @@
         </div>
         <div class="stageTools">
           <button id="modeMoveBtn" class="tool active">移動</button>
-          <button id="modeRotateBtn" class="tool">向き変更</button>
+          <button id="modeRotateBtn" class="tool">向き</button>
           <button id="modeScaleBtn" class="tool">スケール</button>
           <button id="modeViewBtn" class="tool">視点操作</button>
-          <button id="camResetBtn">カメラリセット</button>
+          <button id="camResetBtn">視点リセット</button>
         </div>
       </div>
 
       <div id="stageWrap">
         <canvas id="stage"></canvas>
-        <div class="stageHint">選択中：<span id="selectedSpriteName">未選択</span></div>
+
+        <!-- 3D当たり判定を使わない、安定重視の2D SVGつまみ -->
+        <svg id="gizmoOverlay" class="gizmoOverlay">
+          <g id="moveGizmo">
+            <line class="axis axisX" id="moveXLine" />
+            <polygon class="axisFill axisXFill" id="moveXHead" />
+            <line class="axis axisY" id="moveYLine" />
+            <polygon class="axisFill axisYFill" id="moveYHead" />
+            <line class="axis axisZ" id="moveZLine" />
+            <polygon class="axisFill axisZFill" id="moveZHead" />
+          </g>
+
+          <g id="scaleGizmo">
+            <line class="axis axisX" id="scaleXLine" />
+            <rect class="scaleBox axisXFill" id="scaleXBox" />
+            <line class="axis axisY" id="scaleYLine" />
+            <rect class="scaleBox axisYFill" id="scaleYBox" />
+            <line class="axis axisZ" id="scaleZLine" />
+            <rect class="scaleBox axisZFill" id="scaleZBox" />
+          </g>
+
+          <g id="rotateGizmo">
+            <circle class="ring ringX" id="rotateXRing" />
+            <circle class="ring ringY" id="rotateYRing" />
+            <circle class="ring ringZ" id="rotateZRing" />
+          </g>
+        </svg>
+
+        <div id="stageHint" class="stageHint">選択中：<span id="selectedSpriteName">未選択</span></div>
       </div>
     </section>
 
@@ -80,14 +106,12 @@
 
       <button id="deleteSpriteBtn" class="danger full">選択スプライト削除</button>
 
-      <div class="panelTitle small">説明</div>
+      <div class="panelTitle small">使い方</div>
       <p class="note">
-        ・最初からCameraがあります。<br>
-        ・実行中はCameraの位置と向きが画面になります。<br>
-        ・白い線がCameraの向きです。<br>
-        ・移動/向き変更/スケール中はカメラ操作OFFです。<br>
-        ・カメラを動かしたい時は「視点操作」を押してください。<br>
-        ・ステージ上のスプライトを選んで移動/回転/スケールできます。
+        ・移動/向き/スケール中は、画面上の色つまみをドラッグ。<br>
+        ・赤=X、緑=Y、青=Zです。<br>
+        ・視点を動かす時だけ「視点操作」を押してください。<br>
+        ・実行中はCameraスプライトの位置と向きが画面になります。
       </p>
     </section>
 
@@ -106,6 +130,7 @@
         <strong>追加するスプライトを選ぶ</strong>
         <button id="closeModalBtn">×</button>
       </div>
+
       <div class="spriteChoices">
         <button class="choice" data-kind="box">▭<span>直方体</span></button>
         <button class="choice" data-kind="sphere">●<span>球</span></button>
@@ -137,6 +162,7 @@
     <category name="見た目" colour="270">
       <block type="set_color"><field name="COLOR">#ff6b6b</field></block>
       <block type="set_scale"><field name="SCALE">1.2</field></block>
+      <block type="set_scale_xyz"><field name="X">1</field><field name="Y">1</field><field name="Z">1</field></block>
     </category>
   </xml>
 
