@@ -117,3 +117,12 @@
 - 移動 / 向き変更 / スケール中は OrbitControls を完全OFF
 - カメラを動かしたい時だけ「視点操作」モードで OrbitControls をON
 - 視点操作モード中は TransformControls を非表示にして、誤操作を防止
+
+
+## 追加修正12
+
+- TransformControlsの内部RaycasterもEDITOR_LAYERを見るように修正
+  - これが合っていないと、見た目は出てもつまみが掴めない
+- 視点操作モードをOrbitControls任せにせず、自前のポインター操作で回転できるように修正
+- 視点操作モードではドラッグで回転、ホイールでズーム
+- TransformControlsのサイズをさらに少し大きく調整

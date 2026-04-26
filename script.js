@@ -47,6 +47,14 @@ let workspace = null;
 let isLoadingWorkspace = false;
 const pressedKeys = new Set();
 
+let viewDragging = false;
+let viewPointerId = null;
+let viewLastX = 0;
+let viewLastY = 0;
+let viewYaw = 0;
+let viewPitch = 0;
+let viewDistance = 10;
+
 function uid(){ return (crypto && crypto.randomUUID) ? crypto.randomUUID() : "id_" + Math.random().toString(36).slice(2); }
 
 if (!window.Blockly) {
@@ -84,9 +92,13 @@ controls.enabled = false;
 // Three.js公式のオブジェクト操作UI
 const transformControls = new TransformControls(previewCamera, renderer.domElement);
 transformControls.setMode("translate");
-transformControls.setSize(1.25);
+transformControls.setSize(1.35);
 transformControls.layers.set(EDITOR_LAYER);
 transformControls.traverse(child => child.layers.set(EDITOR_LAYER));
+
+// 重要：TransformControls本体だけでなく、内部Raycasterも同じレイヤーを見る必要がある
+transformControls.getRaycaster().layers.set(EDITOR_LAYER);
+
 scene.add(transformControls);
 
 transformControls.addEventListener("dragging-changed", event => {
@@ -492,43 +504,82 @@ let dragPointerId = null;
 function pointerHitsTransformControls(e){
   if(running) return false;
   if(!getSelectedSprite()) return false;
+  if(editMode === "view") return false;
 
   const rect = stageWrap.getBoundingClientRect();
   pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-  raycaster.layers.set(EDITOR_LAYER);
-  raycaster.setFromCamera(pointer, previewCamera);
+  // TransformControlsは内部RaycasterもEDITOR_LAYERを見る設定にしてある
+  const tcRaycaster = transformControls.getRaycaster();
+  tcRaycaster.layers.set(EDITOR_LAYER);
+  tcRaycaster.setFromCamera(pointer, previewCamera);
 
-  const hits = raycaster.intersectObject(transformControls, true);
-  raycaster.layers.set(GAME_LAYER);
-
+  const hits = tcRaycaster.intersectObject(transformControls, true);
   return hits.length > 0;
 }
 
-// OrbitControlsより先に、つまみ上のpointerdownを検知してカメラ操作を止める。
-// stopPropagationはしない。TransformControlsにはイベントを渡す。
-stageWrap.addEventListener("pointerdown", e => {
-  if(pointerHitsTransformControls(e)){
-    controls.enabled = false;
-  }
-}, true);
+function startViewDrag(e){
+  viewDragging = true;
+  viewPointerId = e.pointerId;
+  viewLastX = e.clientX;
+  viewLastY = e.clientY;
 
-stageWrap.addEventListener("pointerup", () => {
-  if(!transformControls.dragging) controls.enabled = editMode === "view";
-}, true);
+  const offset = previewCamera.position.clone().sub(controls.target);
+  viewDistance = Math.max(1, offset.length());
+  viewYaw = Math.atan2(offset.x, offset.z);
+  viewPitch = Math.asin(offset.y / viewDistance);
 
-stageWrap.addEventListener("pointercancel", () => {
-  controls.enabled = editMode === "view";
-}, true);
+  try { stageWrap.setPointerCapture(e.pointerId); } catch(_) {}
+}
+
+function updateViewDrag(e){
+  if(!viewDragging || e.pointerId !== viewPointerId) return;
+
+  const dx = e.clientX - viewLastX;
+  const dy = e.clientY - viewLastY;
+  viewLastX = e.clientX;
+  viewLastY = e.clientY;
+
+  viewYaw -= dx * 0.006;
+  viewPitch += dy * 0.006;
+  viewPitch = Math.max(-1.25, Math.min(1.25, viewPitch));
+
+  const x = Math.sin(viewYaw) * Math.cos(viewPitch) * viewDistance;
+  const y = Math.sin(viewPitch) * viewDistance;
+  const z = Math.cos(viewYaw) * Math.cos(viewPitch) * viewDistance;
+
+  previewCamera.position.copy(controls.target).add(new THREE.Vector3(x, y, z));
+  previewCamera.lookAt(controls.target);
+}
+
+function endViewDrag(e){
+  if(!viewDragging) return;
+  if(e && viewPointerId !== null && e.pointerId !== viewPointerId) return;
+
+  try {
+    if(e) stageWrap.releasePointerCapture(e.pointerId);
+  } catch(_) {}
+
+  viewDragging = false;
+  viewPointerId = null;
+}
 
 stageWrap.addEventListener("pointerdown", e=>{
   if(running) return;
-  if(editMode === "view") return;
 
-  // 公式TransformControlsを操作中、またはつまみ上を押しているときは、
-  // スプライト選択処理を動かさない
-  if(transformControls.dragging || pointerHitsTransformControls(e)) return;
+  // 視点操作モード：公式OrbitControlsが効かない環境でも動くように、自前で視点回転
+  if(editMode === "view"){
+    e.preventDefault();
+    e.stopPropagation();
+    startViewDrag(e);
+    return;
+  }
+
+  // TransformControls上のクリックは、選択処理を絶対に動かさない
+  if(transformControls.dragging || pointerHitsTransformControls(e)){
+    return;
+  }
 
   const rect = stageWrap.getBoundingClientRect();
   pointer.x = ((e.clientX-rect.left)/rect.width)*2-1;
@@ -550,7 +601,33 @@ stageWrap.addEventListener("pointerdown", e=>{
     const clickedSprite = sprites.find(s => s.id === id);
     if(clickedSprite) selectSprite(id);
   }
-});
+}, true);
+
+stageWrap.addEventListener("pointermove", e=>{
+  if(editMode !== "view") return;
+  e.preventDefault();
+  e.stopPropagation();
+  updateViewDrag(e);
+}, true);
+
+stageWrap.addEventListener("pointerup", e=>{
+  endViewDrag(e);
+}, true);
+
+stageWrap.addEventListener("pointercancel", e=>{
+  endViewDrag(e);
+}, true);
+
+stageWrap.addEventListener("wheel", e=>{
+  if(editMode !== "view") return;
+  e.preventDefault();
+
+  const offset = previewCamera.position.clone().sub(controls.target);
+  const distance = Math.max(1, offset.length() * (e.deltaY > 0 ? 1.08 : 0.92));
+  offset.normalize().multiplyScalar(distance);
+  previewCamera.position.copy(controls.target).add(offset);
+  previewCamera.lookAt(controls.target);
+}, { passive:false });
 
 function setMode(mode){
   editMode = mode;
@@ -576,7 +653,9 @@ function setMode(mode){
 
   if(mode==="view") {
     document.getElementById("modeViewBtn").classList.add("active");
-    controls.enabled = true;
+    // OrbitControlsに任せず、自前の視点操作を使う
+    controls.enabled = false;
+    transformControls.detach();
   }
 
   updateGizmo();
@@ -836,7 +915,7 @@ function animate(time){
     for(const s of sprites){ executeSprite(s,dt); updatePhysics(s); }
     renderProps();
   }
-  controls.update();
+  if(controls.enabled) controls.update();
   updateGizmo();
   renderer.render(scene, running ? syncGameCamera() : previewCamera);
 }
