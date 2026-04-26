@@ -479,8 +479,12 @@ function setObjectColor(sprite){
 ----------------------------- */
 
 function projectToScreen(object){
+  return projectWorldToScreen(object.position.clone());
+}
+
+function projectWorldToScreen(worldPos){
   const rect = stageWrap.getBoundingClientRect();
-  const pos = object.position.clone();
+  const pos = worldPos.clone();
   pos.project(previewCamera);
 
   return {
@@ -516,7 +520,7 @@ function arrowHead(x, y, angle){
 function updateGizmo(){
   const sprite = getSelectedSprite();
 
-  if(!sprite || running || editMode === "view"){
+  if(!sprite || running){
     gizmoOverlay.style.display = "none";
     return;
   }
@@ -532,36 +536,44 @@ function updateGizmo(){
     return;
   }
 
-  const len = 88;
-  const xDir = { x: 1, y: 0 };
-  const yDir = { x: 0, y: -1 };
-  const zDir = { x: 0.72, y: 0.72 };
-
   moveGizmo.style.display = editMode === "translate" ? "" : "none";
   scaleGizmo.style.display = editMode === "scale" ? "" : "none";
   rotateGizmo.style.display = editMode === "rotate" ? "" : "none";
 
+  // 3D上のX/Y/Z方向をスクリーンに投影する。
+  // これで視点を回しても「赤=X、緑=Y、青=Z」が3D方向として分かる。
+  const axisLen3D = 2.2;
+  const origin3D = sprite.object.position.clone();
+
+  const xEnd = projectWorldToScreen(origin3D.clone().add(new THREE.Vector3(axisLen3D, 0, 0)));
+  const yEnd = projectWorldToScreen(origin3D.clone().add(new THREE.Vector3(0, axisLen3D, 0)));
+  const zEnd = projectWorldToScreen(origin3D.clone().add(new THREE.Vector3(0, 0, axisLen3D)));
+
+  const xAngle = Math.atan2(xEnd.y - p.y, xEnd.x - p.x);
+  const yAngle = Math.atan2(yEnd.y - p.y, yEnd.x - p.x);
+  const zAngle = Math.atan2(zEnd.y - p.y, zEnd.x - p.x);
+
   // 移動
-  setLine(gizmoParts.moveXLine, p.x, p.y, p.x + xDir.x * len, p.y + xDir.y * len);
-  setHead(gizmoParts.moveXHead, arrowHead(p.x + xDir.x * len, p.y + xDir.y * len, 0));
+  setLine(gizmoParts.moveXLine, p.x, p.y, xEnd.x, xEnd.y);
+  setHead(gizmoParts.moveXHead, arrowHead(xEnd.x, xEnd.y, xAngle));
 
-  setLine(gizmoParts.moveYLine, p.x, p.y, p.x + yDir.x * len, p.y + yDir.y * len);
-  setHead(gizmoParts.moveYHead, arrowHead(p.x + yDir.x * len, p.y + yDir.y * len, -Math.PI / 2));
+  setLine(gizmoParts.moveYLine, p.x, p.y, yEnd.x, yEnd.y);
+  setHead(gizmoParts.moveYHead, arrowHead(yEnd.x, yEnd.y, yAngle));
 
-  setLine(gizmoParts.moveZLine, p.x, p.y, p.x + zDir.x * len, p.y + zDir.y * len);
-  setHead(gizmoParts.moveZHead, arrowHead(p.x + zDir.x * len, p.y + zDir.y * len, Math.PI / 4));
+  setLine(gizmoParts.moveZLine, p.x, p.y, zEnd.x, zEnd.y);
+  setHead(gizmoParts.moveZHead, arrowHead(zEnd.x, zEnd.y, zAngle));
 
   // スケール
-  setLine(gizmoParts.scaleXLine, p.x, p.y, p.x + xDir.x * len, p.y + xDir.y * len);
-  setBox(gizmoParts.scaleXBox, p.x + xDir.x * len - 13, p.y + xDir.y * len - 13);
+  setLine(gizmoParts.scaleXLine, p.x, p.y, xEnd.x, xEnd.y);
+  setBox(gizmoParts.scaleXBox, xEnd.x - 13, xEnd.y - 13);
 
-  setLine(gizmoParts.scaleYLine, p.x, p.y, p.x + yDir.x * len, p.y + yDir.y * len);
-  setBox(gizmoParts.scaleYBox, p.x + yDir.x * len - 13, p.y + yDir.y * len - 13);
+  setLine(gizmoParts.scaleYLine, p.x, p.y, yEnd.x, yEnd.y);
+  setBox(gizmoParts.scaleYBox, yEnd.x - 13, yEnd.y - 13);
 
-  setLine(gizmoParts.scaleZLine, p.x, p.y, p.x + zDir.x * len, p.y + zDir.y * len);
-  setBox(gizmoParts.scaleZBox, p.x + zDir.x * len - 13, p.y + zDir.y * len - 13);
+  setLine(gizmoParts.scaleZLine, p.x, p.y, zEnd.x, zEnd.y);
+  setBox(gizmoParts.scaleZBox, zEnd.x - 13, zEnd.y - 13);
 
-  // 回転リング。2Dリングで安定操作
+  // 回転リングは中心は3D位置。楕円っぽくしたいが、安定優先で3色リング。
   setCircle(gizmoParts.rotateXRing, p.x, p.y, 62);
   setCircle(gizmoParts.rotateYRing, p.x, p.y, 78);
   setCircle(gizmoParts.rotateZRing, p.x, p.y, 94);
@@ -576,6 +588,26 @@ function setCircle(el, x, y, r){
   el.setAttribute("cx", x);
   el.setAttribute("cy", y);
   el.setAttribute("r", r);
+}
+
+function axisWorldVector(axis){
+  if(axis === "x") return new THREE.Vector3(1, 0, 0);
+  if(axis === "y") return new THREE.Vector3(0, 1, 0);
+  return new THREE.Vector3(0, 0, 1);
+}
+
+function axisScreenVector(sprite, axis){
+  const origin = projectWorldToScreen(sprite.object.position.clone());
+  const end = projectWorldToScreen(sprite.object.position.clone().add(axisWorldVector(axis).multiplyScalar(2.2)));
+
+  const v = new THREE.Vector2(end.x - origin.x, end.y - origin.y);
+  if(v.lengthSq() < 0.0001) return new THREE.Vector2(1, 0);
+  return v.normalize();
+}
+
+function dragAmountAlongAxis(sprite, axis, dx, dy, power){
+  const v = axisScreenVector(sprite, axis);
+  return (dx * v.x + dy * v.y) * power;
 }
 
 function startGizmoDrag(axis, mode, e){
@@ -613,27 +645,21 @@ function updateGizmoDrag(e){
   const dy = e.clientY - drag.startY;
 
   if(drag.mode === "translate"){
-    const amountX = dx * 0.03;
-    const amountY = -dy * 0.03;
-    const amountZ = (dx + dy) * 0.02;
-
+    const amount = dragAmountAlongAxis(sprite, drag.axis, dx, dy, 0.035);
     sprite.object.position.copy(drag.startPosition);
 
-    if(drag.axis === "x") sprite.object.position.x += amountX;
-    if(drag.axis === "y") sprite.object.position.y += amountY;
-    if(drag.axis === "z") sprite.object.position.z += amountZ;
+    if(drag.axis === "x") sprite.object.position.x += amount;
+    if(drag.axis === "y") sprite.object.position.y += amount;
+    if(drag.axis === "z") sprite.object.position.z += amount;
   }
 
   if(drag.mode === "scale"){
+    const amount = dragAmountAlongAxis(sprite, drag.axis, dx, dy, 0.025);
     sprite.object.scale.copy(drag.startScale);
 
-    const amountX = dx * 0.02;
-    const amountY = -dy * 0.02;
-    const amountZ = (dx + dy) * 0.015;
-
-    if(drag.axis === "x") sprite.object.scale.x = Math.max(0.1, drag.startScale.x + amountX);
-    if(drag.axis === "y") sprite.object.scale.y = Math.max(0.1, drag.startScale.y + amountY);
-    if(drag.axis === "z") sprite.object.scale.z = Math.max(0.1, drag.startScale.z + amountZ);
+    if(drag.axis === "x") sprite.object.scale.x = Math.max(0.1, drag.startScale.x + amount);
+    if(drag.axis === "y") sprite.object.scale.y = Math.max(0.1, drag.startScale.y + amount);
+    if(drag.axis === "z") sprite.object.scale.z = Math.max(0.1, drag.startScale.z + amount);
   }
 
   if(drag.mode === "rotate"){
@@ -692,7 +718,7 @@ function setupGizmoEvents(){
 ----------------------------- */
 
 function pickSprite(e){
-  if(running || drag || editMode === "view") return;
+  if(running || drag) return;
 
   const rect = stageWrap.getBoundingClientRect();
   pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -716,7 +742,7 @@ function pickSprite(e){
 }
 
 function startViewDrag(e){
-  if(editMode !== "view" || running) return;
+  if(running) return;
 
   e.preventDefault();
 
@@ -763,11 +789,12 @@ function endViewDrag(e){
 }
 
 stageWrap.addEventListener("pointerdown", e => {
-  if(editMode === "view") {
-    startViewDrag(e);
-  } else {
-    pickSprite(e);
-  }
+  if(running || drag) return;
+
+  // つまみ以外の背景/ステージドラッグは、いつでも視点移動。
+  // ただし、最初にクリックした時点でスプライト選択も行う。
+  pickSprite(e);
+  startViewDrag(e);
 });
 
 stageWrap.addEventListener("pointermove", updateViewDrag);
@@ -775,8 +802,6 @@ stageWrap.addEventListener("pointerup", endViewDrag);
 stageWrap.addEventListener("pointercancel", endViewDrag);
 
 stageWrap.addEventListener("wheel", e => {
-  if(editMode !== "view") return;
-
   e.preventDefault();
 
   const offset = previewCamera.position.clone().sub(viewTarget);
@@ -1147,8 +1172,6 @@ function setMode(mode){
   if(mode === "translate") document.getElementById("modeMoveBtn").classList.add("active");
   if(mode === "rotate") document.getElementById("modeRotateBtn").classList.add("active");
   if(mode === "scale") document.getElementById("modeScaleBtn").classList.add("active");
-  if(mode === "view") document.getElementById("modeViewBtn").classList.add("active");
-
   updateGizmo();
 }
 
@@ -1225,7 +1248,6 @@ clearBtn.onclick = clearProject;
 document.getElementById("modeMoveBtn").onclick = () => setMode("translate");
 document.getElementById("modeRotateBtn").onclick = () => setMode("rotate");
 document.getElementById("modeScaleBtn").onclick = () => setMode("scale");
-document.getElementById("modeViewBtn").onclick = () => setMode("view");
 
 document.getElementById("camResetBtn").onclick = () => {
   previewCamera.position.set(7, 5, 8);
