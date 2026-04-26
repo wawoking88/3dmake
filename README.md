@@ -101,3 +101,11 @@
 - タッチやドラッグの掴みっぱなし問題を軽減
 - 移動/向き変更/スケールは公式UIで操作
 - 実行中は TransformControls を非表示・解除
+
+
+## 追加修正10
+
+- TransformControlsのつまみを押した瞬間に、OrbitControls（カメラ操作）を先に停止
+- つまみ上を押したときはスプライト選択処理を走らせないように修正
+- TransformControlsのつまみサイズを少し大きくしてタッチしやすく調整
+- canvas / stageWrap に touch-action:none を追加

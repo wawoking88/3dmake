@@ -55,6 +55,7 @@ if (!window.Blockly) {
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.domElement.style.touchAction = "none";
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdbeafe);
@@ -80,13 +81,21 @@ controls.enableDamping = true;
 // Three.js公式のオブジェクト操作UI
 const transformControls = new TransformControls(previewCamera, renderer.domElement);
 transformControls.setMode("translate");
-transformControls.setSize(1.05);
+transformControls.setSize(1.25);
 transformControls.layers.set(EDITOR_LAYER);
 transformControls.traverse(child => child.layers.set(EDITOR_LAYER));
 scene.add(transformControls);
 
 transformControls.addEventListener("dragging-changed", event => {
   controls.enabled = !event.value;
+});
+
+transformControls.addEventListener("mouseDown", () => {
+  controls.enabled = false;
+});
+
+transformControls.addEventListener("mouseUp", () => {
+  controls.enabled = true;
 });
 
 transformControls.addEventListener("objectChange", () => {
@@ -474,11 +483,46 @@ let draggingSelectedBody = false;
 let dragSpriteId = null;
 let dragKind = null;
 let dragPointerId = null;
+
+function pointerHitsTransformControls(e){
+  if(running) return false;
+  if(!getSelectedSprite()) return false;
+
+  const rect = stageWrap.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.layers.set(EDITOR_LAYER);
+  raycaster.setFromCamera(pointer, previewCamera);
+
+  const hits = raycaster.intersectObject(transformControls, true);
+  raycaster.layers.set(GAME_LAYER);
+
+  return hits.length > 0;
+}
+
+// OrbitControlsより先に、つまみ上のpointerdownを検知してカメラ操作を止める。
+// stopPropagationはしない。TransformControlsにはイベントを渡す。
+stageWrap.addEventListener("pointerdown", e => {
+  if(pointerHitsTransformControls(e)){
+    controls.enabled = false;
+  }
+}, true);
+
+stageWrap.addEventListener("pointerup", () => {
+  if(!transformControls.dragging) controls.enabled = true;
+}, true);
+
+stageWrap.addEventListener("pointercancel", () => {
+  controls.enabled = true;
+}, true);
+
 stageWrap.addEventListener("pointerdown", e=>{
   if(running) return;
 
-  // 公式TransformControlsを操作中は、選択処理を邪魔しない
-  if(transformControls.dragging) return;
+  // 公式TransformControlsを操作中、またはつまみ上を押しているときは、
+  // スプライト選択処理を動かさない
+  if(transformControls.dragging || pointerHitsTransformControls(e)) return;
 
   const rect = stageWrap.getBoundingClientRect();
   pointer.x = ((e.clientX-rect.left)/rect.width)*2-1;
