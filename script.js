@@ -77,6 +77,9 @@ gameCamera.layers.set(GAME_LAYER);
 const controls = new OrbitControls(previewCamera, renderer.domElement);
 controls.target.set(0,1,0);
 controls.enableDamping = true;
+// 編集モード中はカメラ操作を基本OFFにする。
+// 「視点操作」モードのときだけON。
+controls.enabled = false;
 
 // Three.js公式のオブジェクト操作UI
 const transformControls = new TransformControls(previewCamera, renderer.domElement);
@@ -87,7 +90,9 @@ transformControls.traverse(child => child.layers.set(EDITOR_LAYER));
 scene.add(transformControls);
 
 transformControls.addEventListener("dragging-changed", event => {
-  controls.enabled = !event.value;
+  // TransformControls操作中は必ずカメラ操作OFF。
+  // 操作後も、視点操作モード以外ではOFFのまま。
+  controls.enabled = editMode === "view" && !event.value;
 });
 
 transformControls.addEventListener("mouseDown", () => {
@@ -95,7 +100,7 @@ transformControls.addEventListener("mouseDown", () => {
 });
 
 transformControls.addEventListener("mouseUp", () => {
-  controls.enabled = true;
+  controls.enabled = editMode === "view";
 });
 
 transformControls.addEventListener("objectChange", () => {
@@ -464,7 +469,7 @@ function updateGizmo(){
   // 古い自作ガイドは使わない。公式TransformControlsだけ使う。
   gizmo.visible = false;
 
-  if(!s || running){
+  if(!s || running || editMode === "view"){
     transformControls.detach();
     return;
   }
@@ -510,15 +515,16 @@ stageWrap.addEventListener("pointerdown", e => {
 }, true);
 
 stageWrap.addEventListener("pointerup", () => {
-  if(!transformControls.dragging) controls.enabled = true;
+  if(!transformControls.dragging) controls.enabled = editMode === "view";
 }, true);
 
 stageWrap.addEventListener("pointercancel", () => {
-  controls.enabled = true;
+  controls.enabled = editMode === "view";
 }, true);
 
 stageWrap.addEventListener("pointerdown", e=>{
   if(running) return;
+  if(editMode === "view") return;
 
   // 公式TransformControlsを操作中、またはつまみ上を押しているときは、
   // スプライト選択処理を動かさない
@@ -549,18 +555,30 @@ stageWrap.addEventListener("pointerdown", e=>{
 function setMode(mode){
   editMode = mode;
   document.querySelectorAll(".tool").forEach(b=>b.classList.remove("active"));
+
   if(mode==="translate") {
     document.getElementById("modeMoveBtn").classList.add("active");
     transformControls.setMode("translate");
+    controls.enabled = false;
   }
+
   if(mode==="rotate") {
     document.getElementById("modeRotateBtn").classList.add("active");
     transformControls.setMode("rotate");
+    controls.enabled = false;
   }
+
   if(mode==="scale") {
     document.getElementById("modeScaleBtn").classList.add("active");
     transformControls.setMode("scale");
+    controls.enabled = false;
   }
+
+  if(mode==="view") {
+    document.getElementById("modeViewBtn").classList.add("active");
+    controls.enabled = true;
+  }
+
   updateGizmo();
 }
 
@@ -731,6 +749,7 @@ function runProject(){
   statusEl.textContent = "実行中";
   gizmo.visible = false;
   transformControls.detach();
+  controls.enabled = false;
   updateRunStopButtons();
 
   // 実行用の一時状態だけ初期化。位置・向き・大きさなどは保存済み
@@ -831,6 +850,7 @@ document.getElementById("deleteSpriteBtn").onclick=deleteSelected;
 document.getElementById("modeMoveBtn").onclick=()=>setMode("translate");
 document.getElementById("modeRotateBtn").onclick=()=>setMode("rotate");
 document.getElementById("modeScaleBtn").onclick=()=>setMode("scale");
+document.getElementById("modeViewBtn").onclick=()=>setMode("view");
 document.getElementById("camResetBtn").onclick=()=>{ previewCamera.position.set(7,5,8); controls.target.set(0,1,0); };
 document.getElementById("openAddSpriteBtn").onclick=()=>modal.classList.remove("hidden");
 document.getElementById("closeModalBtn").onclick=()=>modal.classList.add("hidden");

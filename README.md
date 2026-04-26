@@ -109,3 +109,11 @@
 - つまみ上を押したときはスプライト選択処理を走らせないように修正
 - TransformControlsのつまみサイズを少し大きくしてタッチしやすく調整
 - canvas / stageWrap に touch-action:none を追加
+
+
+## 追加修正11
+
+- カメラ操作とスプライト編集を完全分離
+- 移動 / 向き変更 / スケール中は OrbitControls を完全OFF
+- カメラを動かしたい時だけ「視点操作」モードで OrbitControls をON
+- 視点操作モード中は TransformControls を非表示にして、誤操作を防止
